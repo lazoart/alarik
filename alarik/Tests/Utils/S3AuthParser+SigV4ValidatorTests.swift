@@ -22,8 +22,9 @@ import SotoSignerV4
 import Testing
 import Vapor
 
-// Needed for Linux
+#if os(Linux)
 import FoundationNetworking
+#endif
 
 @testable import Alarik
 
