@@ -47,16 +47,25 @@ const items = computed<NavigationMenuItem[][]>(() => {
                 type: "label",
             },
             {
+                label: "Users",
+                icon: "i-lucide-users",
+                to: "/console/admin/users",
+                active: route.path.startsWith("/console/admin/users"),
+                disabled: !user.value.isAdmin,
+            },
+            {
                 label: "Buckets",
                 icon: "i-lucide-cylinder",
                 to: "/console/buckets",
                 active: route.path.startsWith("/console/buckets"),
+                disabled: !user.value.isAdmin,
             },
             {
                 label: "Policies",
                 icon: "i-lucide-shield-user",
                 to: "/console",
                 active: route.path.startsWith("/console/policies"),
+                disabled: true,
             },
         ],
         [
@@ -70,6 +79,7 @@ const items = computed<NavigationMenuItem[][]>(() => {
                 icon: "i-lucide-cog",
                 to: "/console",
                 active: route.path.startsWith("/console/settings"),
+                disabled: true,
             },
         ],
     ];

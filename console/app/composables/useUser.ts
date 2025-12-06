@@ -15,12 +15,13 @@ limitations under the License.
 */
 
 export const useUser = () => {
-    return useState<{ id: string; name: string; username: string; isLoggedIn: boolean }>("user", () => {
+    return useState<{ id: string; name: string; username: string; isLoggedIn: boolean; isAdmin: boolean; }>("user", () => {
         return {
             id: "",
             name: "",
             username: "",
             isLoggedIn: false,
+            isAdmin: false,
         };
     });
 };

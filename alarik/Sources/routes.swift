@@ -23,6 +23,7 @@ func routes(_ app: Application) throws {
     let apiV1: any RoutesBuilder = app.grouped("api", "v1")
     try apiV1.register(collection: InternalUserController())
     try apiV1.grouped(SessionToken.authenticator()).register(collection: InternalBaseController())
+    try apiV1.grouped(SessionToken.authenticator()).register(collection: InternalAdminController())
     try apiV1.grouped(SessionToken.authenticator()).register(collection: InternalBucketController())
 
     // S3

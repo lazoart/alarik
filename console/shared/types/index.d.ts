@@ -36,6 +36,13 @@ declare global {
         createdAt: string;
     }
 
+    export interface User {
+        id: string;
+        name: string;
+        username: string;
+        isAdmin: boolean;
+    }
+
     // Fluent Page
     export interface Page<T> {
         items: T[];

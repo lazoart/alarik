@@ -21,6 +21,23 @@ import VaporTesting
 
 @testable import Alarik
 
+/// Uses the already existing admin user alarik
+public func createAdminUserAndLogin(_ app: Application) async throws -> String {
+    // We are testing, so there should be a default admin user.
+    var token = ""
+    try await app.test(
+        .POST, "/api/v1/users/login",
+        beforeRequest: { req in
+            try req.content.encode(["username": "alarik", "password": "alarik"])
+        },
+        afterResponse: { res async throws in
+            let tokenResponse = try res.content.decode(ClientTokenResponse.self)
+            token = tokenResponse.token
+        })
+
+    return token
+}
+
 public func createUserAndLogin(_ app: Application) async throws -> String {
     let createDTO = User.Create(
         name: "Test User",
