@@ -66,6 +66,7 @@ Contributions, issues, feedback, and real-world testing are **highly encouraged*
 
 We welcome contributions of any size. Please:
 
+-   Use `dev` branch as your base branch - not master
 -   Use clear, descriptive commit messages
 -   Open an issue before starting larger work
 -   Follow Swift best practices
