@@ -22,6 +22,9 @@ import SotoSignerV4
 import Testing
 import Vapor
 
+// Needed for Linux
+import FoundationNetworking
+
 @testable import Alarik
 
 @Suite("Additional S3AuthParser+SigV4Validator Tests", .serialized)
