@@ -89,7 +89,7 @@ async function login(e: Event) {
                         </div>
                     </UForm>
                     <div class="flex flex-row gap-4 items-center justify-center pt-4">
-                        <UButton icon="grommet-icons:github" to="https://github.com" target="_blank" color="primary" variant="ghost" />
+                        <UButton icon="grommet-icons:github" to="https://github.com/achtungsoftware/alarik" target="_blank" color="primary" variant="ghost" />
                     </div>
                 </div>
             </div>
