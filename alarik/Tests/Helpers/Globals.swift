@@ -21,8 +21,26 @@ import VaporTesting
 
 @testable import Alarik
 
+/// Creates a non-admin user with random username
+public func createRandomUser(_ app: Application) async throws {
+    let createDTO = User.Create(
+        name: "Test User",
+        username: UUID().uuidString,
+        password: "TestPass123!",
+        isAdmin: false
+    )
+
+    try await app.test(
+        .POST, "/api/v1/users",
+        beforeRequest: { req in
+            try req.content.encode(createDTO)
+        },
+        afterResponse: { res async throws in
+        })
+}
+
 /// Uses the already existing admin user alarik
-public func createAdminUserAndLogin(_ app: Application) async throws -> String {
+public func loginDefaultAdminUser(_ app: Application) async throws -> String {
     // We are testing, so there should be a default admin user.
     var token = ""
     try await app.test(

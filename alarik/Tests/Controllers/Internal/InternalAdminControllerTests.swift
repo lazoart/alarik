@@ -42,10 +42,54 @@ struct InternalAdminControllerTests {
         try await app.asyncShutdown()
     }
 
+    @Test("List users as admin - should pass")
+    func testListUsers() async throws {
+        try await withApp { app in
+            let token = try await loginDefaultAdminUser(app)
+
+            // Create 3 users
+            try await createRandomUser(app)
+            try await createRandomUser(app)
+            try await createRandomUser(app)
+
+            try await app.test(
+                .GET, "/api/v1/admin/users",
+                beforeRequest: { req in
+                    req.headers.bearerAuthorization = BearerAuthorization(token: token)
+                },
+                afterResponse: { res async throws in
+                    let page = try res.content.decode(Page<User.ResponseDTO>.self)
+                    #expect(res.status == .ok)
+                    #expect(page.items.count == 4)
+                })
+        }
+    }
+
+    @Test("List users as non admin - should fail")
+    func testListUsersAsNonAdmin() async throws {
+        try await withApp { app in
+            let token = try await createUserAndLogin(app)
+
+            // Create 3 users
+            try await createRandomUser(app)
+            try await createRandomUser(app)
+            try await createRandomUser(app)
+
+            try await app.test(
+                .GET, "/api/v1/admin/users",
+                beforeRequest: { req in
+                    req.headers.bearerAuthorization = BearerAuthorization(token: token)
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .unauthorized)
+                })
+        }
+    }
+
     @Test("Create user as admin - should pass")
     func testCreateUser() async throws {
         try await withApp { app in
-            let token = try await createAdminUserAndLogin(app)
+            let token = try await loginDefaultAdminUser(app)
 
             let createDTO = User.Create(
                 name: "John Doe",
