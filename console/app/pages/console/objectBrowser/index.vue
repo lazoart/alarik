@@ -86,7 +86,7 @@ const breadcrumbNavItems = computed<BreadcrumbNav[]>(() => {
     if (currentBucket.value) {
         items.push({
             label: currentBucket.value,
-            icon: "i-lucide-database",
+            icon: "i-lucide-cylinder",
             onClick: () => {
                 currentPrefix.value = "";
             },
