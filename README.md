@@ -48,9 +48,21 @@ Because we rely on S3-compatible storage every day, we are fully invested in ens
 
 ## Performance
 
-Initial benchmarks on a **MacBook Pro M4 Pro (12-core)** show Alarik outperforming MinIO and even other high-performance storage projects like **RustFS** (in comparable configurations).
+Alarik is built with a strong focus on low-latency I/O and highly parallel request handling. New benchmarks on a dedicated Linux machine show that Alarik delivers competitive and in many cases superior throughput compared to MinIO or RustFS, even in early alpha stages.
 
-Detailed benchmark results will be published soon.
+### Benchmark Alarik vs MinIO
+
+We use MinIO’s own benchmarking tool, `warp`, to measure performance. Both the object store and the benchmark client run on the same Linux host, ensuring results reflect raw engine performance rather than network conditions.
+
+> These benchmarks represent the current state of the project. As Alarik’s storage engine and I/O pipeline continue to evolve, we expect performance to improve further.
+
+#### Alarik
+
+<img src="assets/alarik_benchmark.png" />
+
+#### MinIO
+
+<img src="assets/minio_benchmark.png" />
 
 ## State of Development
 
