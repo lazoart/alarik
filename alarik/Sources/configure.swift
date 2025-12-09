@@ -24,28 +24,29 @@ public func configure(_ app: Application) async throws {
     // TODO: make this configurable ?
     app.routes.defaultMaxBodySize = "5tb"
     app.http.server.configuration.supportPipelining = true
-    
-#if DEBUG
-    let consoleBaseUrl = "http://localhost:3000"
 
-    // In debug, test & profiling - store the db relative to the work dir
-    app.databases.use(.sqlite(.file("db.sqlite")), as: .sqlite)
-#else
-    let consoleBaseUrl = Environment.get("CONSOLE_BASE_URL") ?? "http://localhost:3000"
-    
-    try FileManager.default.createDirectory(
-        atPath: "Storage/buckets",
-        withIntermediateDirectories: true
-    )
-    app.databases.use(DatabaseConfigurationFactory.sqlite(.file("Storage/db.sqlite")), as: .sqlite)
-#endif
+    #if DEBUG
+        let consoleBaseUrl = "http://localhost:3000"
+
+        // In debug, test & profiling - store the db relative to the work dir
+        app.databases.use(.sqlite(.file("db.sqlite")), as: .sqlite)
+    #else
+        let consoleBaseUrl = Environment.get("CONSOLE_BASE_URL") ?? "http://localhost:3000"
+
+        try FileManager.default.createDirectory(
+            atPath: "Storage/buckets",
+            withIntermediateDirectories: true
+        )
+        app.databases.use(
+            DatabaseConfigurationFactory.sqlite(.file("Storage/db.sqlite")), as: .sqlite)
+    #endif
 
     app.migrations.add(CreateUser())
     app.migrations.add(CreateAccessKey())
     app.migrations.add(CreateBucket())
 
     app.migrations.add(CreateDefaultUser())
-    
+
     let cors: CORSMiddleware = CORSMiddleware(
         configuration: .init(
             allowedOrigin: .any([consoleBaseUrl]),
@@ -71,4 +72,26 @@ public func configure(_ app: Application) async throws {
     try await app.autoMigrate()
 
     try routes(app)
+
+    if app.environment != .testing {
+        app.eventLoopGroup.next().scheduleRepeatedTask(
+            initialDelay: .zero,
+            delay: .minutes(1)
+        ) { task in
+            Task {
+                do {
+                    let expiredAccessKeys = try await AccessKey.query(on: app.db)
+                        .filter(\.$expirationDate <= Date.now)
+                        .all()
+
+                    for accessKey in expiredAccessKeys {
+                        try await AccessKeyService.delete(
+                            on: app.db, accessKey: accessKey.accessKey)
+                    }
+                } catch {
+                    app.logger.error("Failed to invalidate expired access keys: \(error)")
+                }
+            }
+        }
+    }
 }

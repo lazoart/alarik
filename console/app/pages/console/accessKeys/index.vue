@@ -76,6 +76,13 @@ const columns: TableColumn<AccessKey>[] = [
         },
     },
     {
+        accessorKey: "expirationDate",
+        header: "Expiration Date",
+        cell: ({ row }) => {
+            return row.original.expirationDate ? new Date(row.original.expirationDate).toLocaleString() : "never";
+        },
+    },
+    {
         accessorKey: "createdAt",
         header: "Created at",
         cell: ({ row }) => {

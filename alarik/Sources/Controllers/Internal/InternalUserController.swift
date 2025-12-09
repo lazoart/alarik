@@ -50,7 +50,8 @@ struct InternalUserController: RouteCollection {
 
         let create: AccessKey.Create = try req.content.decode(AccessKey.Create.self)
         let accessKey: AccessKey = AccessKey(
-            userId: sessionToken.userId, accessKey: create.accessKey, secretKey: create.secretKey
+            userId: sessionToken.userId, accessKey: create.accessKey, secretKey: create.secretKey,
+            expirationDate: create.expirationDate
         )
 
         do {
@@ -87,22 +88,16 @@ struct InternalUserController: RouteCollection {
             throw Abort(.badRequest, reason: "Invalid access key ID.")
         }
 
-        guard let accessKey = try await AccessKey.query(on: req.db)
-            .filter(\.$id == accessKeyId)
-            .filter(\.$user.$id == sessionToken.userId)
-            .first()
+        guard
+            let accessKey = try await AccessKey.query(on: req.db)
+                .filter(\.$id == accessKeyId)
+                .filter(\.$user.$id == sessionToken.userId)
+                .first()
         else {
             throw Abort(.notFound, reason: "Access key not found.")
         }
 
-        let accessKeyString = accessKey.accessKey
-
-        try await accessKey.delete(on: req.db)
-
-        // Remove from all caches
-        await AccessKeySecretKeyMapCache.shared.remove(accessKey: accessKeyString)
-        await AccessKeyUserMapCache.shared.remove(accessKey: accessKeyString)
-        await AccessKeyBucketMapCache.shared.removeAccessKey(accessKeyString)
+        try await AccessKeyService.delete(on: req.db, accessKey: accessKey.accessKey)
 
         return .noContent
     }

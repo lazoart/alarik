@@ -22,6 +22,10 @@ final class LoadCacheLifecycle: LifecycleHandler {
         do {
             // Load all access keys with their parent user
             let keys = try await AccessKey.query(on: app.db)
+                .group(.or) {
+                    $0.filter(\.$expirationDate == nil)
+                    $0.filter(\.$expirationDate > Date.now)
+                }
                 .with(\.$user)
                 .all()
 

@@ -16,6 +16,7 @@ limitations under the License.
 */
 
 import type { FormSubmitEvent } from "@nuxt/ui";
+import { CalendarDate } from "@internationalized/date";
 
 const props = withDefaults(
     defineProps<{
@@ -32,6 +33,8 @@ const emit = defineEmits(["update:open", "close"]);
 const open = ref(props.open);
 const form = useTemplateRef("form");
 const jwtCookie = useJWTCookie();
+const inputDateRef = useTemplateRef("inputDateRef");
+const expirationDate = shallowRef<CalendarDate | null>(null);
 
 // Fetch generated access key
 const {
@@ -66,7 +69,10 @@ async function submitForm(event: FormSubmitEvent<any>) {
 
         const response = await $fetch<{ token: string }>(`${useRuntimeConfig().public.API_BASE_URL}/api/v1/users/accessKeys`, {
             method: "POST",
-            body: JSON.stringify(state),
+            body: JSON.stringify({
+                ...state,
+                expirationDate: expirationDate.value ? expirationDate.value.toDate("UTC").toISOString() : null,
+            }),
             headers: {
                 "Content-Type": "application/json",
                 Authorization: `Bearer ${jwtCookie.value}`,
@@ -95,6 +101,19 @@ async function submitForm(event: FormSubmitEvent<any>) {
 
                 <UFormField required label="Secret Key" name="secretKey">
                     <UInput placeholder="Secret Key" v-model="state.secretKey" class="w-full" size="lg" variant="subtle" />
+                </UFormField>
+                <UFormField label="Expiration Date" name="expirationDate" help="The Access Key will be deleted automatically if you set a date.">
+                    <UInputDate ref="inputDateRef" v-model="expirationDate" variant="subtle" size="lg" class="w-full">
+                        <template #trailing>
+                            <UPopover :reference="inputDateRef?.inputsRef[3]?.$el">
+                                <UButton color="neutral" variant="link" size="sm" icon="i-lucide-calendar" aria-label="Select a date" class="px-0" />
+
+                                <template #content>
+                                    <UCalendar v-model="expirationDate" class="p-2" />
+                                </template>
+                            </UPopover>
+                        </template>
+                    </UInputDate>
                 </UFormField>
             </UForm>
         </template>

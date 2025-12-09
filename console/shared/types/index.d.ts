@@ -34,6 +34,7 @@ declare global {
         id: string;
         accessKey: string;
         createdAt: string;
+        expirationDate?: string;
     }
 
     export interface User {

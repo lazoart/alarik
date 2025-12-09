@@ -37,17 +37,25 @@ final class AccessKey: Model, @unchecked Sendable {
     @Field(key: "created_at")
     var createdAt: Date
 
+    @Field(key: "expiration_date")
+    var expirationDate: Date?
+
     init() {}
 
     init(
-        id: UUID? = nil, userId: UUID, accessKey: String, secretKey: String,
-        createdAt: Date = Date()
+        id: UUID? = nil,
+        userId: UUID,
+        accessKey: String,
+        secretKey: String,
+        createdAt: Date = Date(),
+        expirationDate: Date? = nil
     ) {
         self.id = id
         self.$user.id = userId
         self.accessKey = accessKey
         self.secretKey = secretKey
         self.createdAt = createdAt
+        self.expirationDate = expirationDate
     }
 }
 
@@ -55,12 +63,14 @@ extension AccessKey {
     struct Create: Content {
         var accessKey: String
         var secretKey: String
+        var expirationDate: Date?
     }
 
     struct ResponseDTO: Content {
         var id: UUID?
         var accessKey: String?
         var createdAt: Date?
+        var expirationDate: Date??
     }
 
     func toResponseDTO() -> AccessKey.ResponseDTO {
@@ -68,6 +78,7 @@ extension AccessKey {
             id: self.id,
             accessKey: self.$accessKey.value,
             createdAt: self.$createdAt.value,
+            expirationDate: self.$expirationDate.value
         )
     }
 }

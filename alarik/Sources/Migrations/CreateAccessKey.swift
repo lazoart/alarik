@@ -24,6 +24,7 @@ struct CreateAccessKey: AsyncMigration {
             .field("access_key", .string, .required)
             .field("secret_key", .string, .required)
             .field("created_at", .datetime, .required)
+            .field("expiration_date", .datetime)
             .unique(on: "access_key")
             .create()
     }
