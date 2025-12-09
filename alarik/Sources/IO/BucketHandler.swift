@@ -50,6 +50,16 @@ struct BucketHandler {
         try fm.removeItem(at: dataURL)
     }
 
+    /// Force deletes a bucket directory including all its contents.
+    static func forceDelete(name: String) throws {
+        let fm = FileManager.default
+        let dataURL = bucketURL(for: name)
+        guard fm.fileExists(atPath: dataURL.path) else {
+            return
+        }
+        try fm.removeItem(at: dataURL)
+    }
+
     /// Lists all bucket names.
     static func list() throws -> [String] {
         let items = try FileManager.default.contentsOfDirectory(

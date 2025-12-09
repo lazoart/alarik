@@ -26,6 +26,8 @@ struct InternalAdminController: RouteCollection {
             .post(use: createUser)
         routes.grouped("admin").grouped("users")
             .put(use: editUser)
+        routes.grouped("admin").grouped("users")
+            .delete(":userId", use: deleteUser)
     }
 
     @Sendable
@@ -119,5 +121,58 @@ struct InternalAdminController: RouteCollection {
         }
 
         return editUser.toUserResponseDTO()
+    }
+
+    @Sendable
+    func deleteUser(req: Request) async throws -> HTTPStatus {
+        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
+
+        guard let fetchedAdminUser: User = try await User.find(sessionToken.userId, on: req.db)
+        else {
+            throw Abort(.unauthorized, reason: "User not found")
+        }
+
+        guard fetchedAdminUser.isAdmin else {
+            throw Abort(.unauthorized, reason: "User not admin")
+        }
+
+        guard let userIdString = req.parameters.get("userId"),
+            let userId = UUID(uuidString: userIdString)
+        else {
+            throw Abort(.badRequest, reason: "Invalid user ID")
+        }
+
+        guard let userToDelete = try await User.find(userId, on: req.db) else {
+            throw Abort(.notFound, reason: "User not found")
+        }
+
+        // Prevent deleting yourself
+        if userToDelete.id == fetchedAdminUser.id {
+            throw Abort(.forbidden, reason: "Cannot delete yourself")
+        }
+
+        // Delete all bucket folders from disk
+        let buckets = try await Bucket.query(on: req.db)
+            .filter(\.$user.$id == userId)
+            .all()
+
+        for bucket in buckets {
+            try BucketHandler.forceDelete(name: bucket.name)
+        }
+
+        // Remove from all caches
+        let accessKeys = try await AccessKey.query(on: req.db)
+            .filter(\.$user.$id == userId)
+            .all()
+
+        for accessKey in accessKeys {
+            await AccessKeyUserMapCache.shared.remove(accessKey: accessKey.accessKey)
+            await AccessKeyBucketMapCache.shared.removeAccessKey(accessKey.accessKey)
+        }
+
+        // Delete the user (buckets and access keys cascade delete in DB)
+        try await userToDelete.delete(on: req.db)
+
+        return .noContent
     }
 }

@@ -41,6 +41,8 @@ const UButton = resolveComponent("UButton");
 
 const selectedUserForEdit = ref<User | null>(null);
 const openUserEditModal = ref(false);
+const selectedUserForDelete = ref<User | null>(null);
+const openSingleDeleteModal = ref(false);
 
 const {
     data: fetchResponse,
@@ -107,15 +109,28 @@ const columns: TableColumn<User>[] = [
                             align: "end",
                         },
                         items: [
-                            {
-                                label: "Edit User",
-                                icon: "i-lucide-square-pen",
-                                onSelect() {
-                                    selectedUserForEdit.value = row.original;
-                                    openUserEditModal.value = true;
+                            [
+                                {
+                                    label: "Edit User",
+                                    icon: "i-lucide-square-pen",
+                                    onSelect() {
+                                        selectedUserForEdit.value = row.original;
+                                        openUserEditModal.value = true;
+                                    },
                                 },
-                            },
-                        ] as DropdownMenuItem,
+                            ],
+                            [
+                                {
+                                    label: "Delete User",
+                                    icon: "i-lucide-trash-2",
+                                    color: "error" as const,
+                                    onSelect() {
+                                        selectedUserForDelete.value = row.original;
+                                        openSingleDeleteModal.value = true;
+                                    },
+                                },
+                            ],
+                        ] as DropdownMenuItem[][],
                         "aria-label": "Action Menu",
                     },
                     () =>
@@ -148,12 +163,102 @@ async function deleteMany() {
     }
 
     isDeleting.value = true;
+    let successCount = 0;
+    let errorCount = 0;
+
+    try {
+        for (const item of items) {
+            try {
+                await $fetch(`${useRuntimeConfig().public.API_BASE_URL}/api/v1/admin/users/${item.id}`, {
+                    method: "DELETE",
+                    headers: {
+                        Authorization: `Bearer ${jwtCookie.value}`,
+                    },
+                });
+                successCount++;
+            } catch (error: any) {
+                console.error(`Failed to delete user ${item.name}:`, error);
+                errorCount++;
+            }
+        }
+
+        // Refresh the list
+        await refresh();
+
+        // Clear selection
+        rowSelection.value = {};
+
+        // Show appropriate toast based on results
+        if (errorCount === 0) {
+            toast.add({
+                title: "Deletion Successful",
+                description: `${successCount} user${successCount !== 1 ? "s" : ""} deleted successfully`,
+                icon: "i-lucide-circle-check",
+                color: "success",
+            });
+        } else if (successCount === 0) {
+            toast.add({
+                title: "Deletion Failed",
+                description: `All ${errorCount} user${errorCount !== 1 ? "s" : ""} failed to delete`,
+                icon: "i-lucide-circle-x",
+                color: "error",
+            });
+        } else {
+            toast.add({
+                title: "Deletion Partially Successful",
+                description: `${successCount} deleted, ${errorCount} failed`,
+                icon: "i-lucide-alert-triangle",
+                color: "warning",
+            });
+        }
+    } finally {
+        isDeleting.value = false;
+    }
+}
+
+async function deleteSingleUser() {
+    const user = selectedUserForDelete.value;
+    if (!user) {
+        return;
+    }
+
+    isDeleting.value = true;
+
+    try {
+        await $fetch(`${useRuntimeConfig().public.API_BASE_URL}/api/v1/admin/users/${user.id}`, {
+            method: "DELETE",
+            headers: {
+                Authorization: `Bearer ${jwtCookie.value}`,
+            },
+        });
+
+        await refresh();
+
+        toast.add({
+            title: "Deletion Successful",
+            description: `User "${user.name}" deleted successfully`,
+            icon: "i-lucide-circle-check",
+            color: "success",
+        });
+    } catch (error: any) {
+        console.error(`Failed to delete user ${user.name}:`, error);
+        toast.add({
+            title: "Deletion Failed",
+            description: error.response?._data?.reason ?? "Failed to delete user",
+            icon: "i-lucide-circle-x",
+            color: "error",
+        });
+    } finally {
+        isDeleting.value = false;
+        selectedUserForDelete.value = null;
+    }
 }
 </script>
 <template>
     <ConfirmationDialog confirmLabel="Delete" v-model:isShowing="openDeletionModal" :title="`Delete ${selectedItems.length} User${selectedItems.length !== 1 ? 's' : ''}`" :onConfirm="deleteMany" :message="`Do you really want to delete ${selectedItems.length} user${selectedItems.length !== 1 ? 's' : ''}? All data from the user will be deleted. This action cannot be undone.`" />
+    <ConfirmationDialog confirmLabel="Delete" v-model:isShowing="openSingleDeleteModal" :title="`Delete User`" :onConfirm="deleteSingleUser" :message="`Do you really want to delete '${selectedUserForDelete?.name}'? All buckets and data from this user will be deleted. This action cannot be undone.`" />
     <EditUserModal v-if="selectedUserForEdit && openUserEditModal" v-model:open="openUserEditModal" :user="selectedUserForEdit" />
-    
+
     <UDashboardPanel
         :ui="{
             body: '!p-0',
