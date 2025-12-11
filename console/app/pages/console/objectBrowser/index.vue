@@ -258,6 +258,7 @@ const columns: TableColumn<BrowserItem>[] = [
                     label: "Preview",
                     variant: "subtle",
                     color: "neutral",
+                    size: "sm",
                     icon: "i-lucide-eye",
                     onClick: (e: Event) => {
                         e.stopPropagation();
@@ -269,6 +270,7 @@ const columns: TableColumn<BrowserItem>[] = [
                     label: "Download",
                     variant: "subtle",
                     color: "neutral",
+                    size: "sm",
                     icon: "i-lucide-download",
                     onClick: async (e: Event) => {
                         e.stopPropagation();
@@ -279,6 +281,7 @@ const columns: TableColumn<BrowserItem>[] = [
                     label: "Delete",
                     variant: "subtle",
                     color: "error",
+                    size: "sm",
                     icon: "i-lucide-trash",
                     onClick: (e: Event) => {
                         e.stopPropagation();
