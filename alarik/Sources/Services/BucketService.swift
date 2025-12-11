@@ -51,6 +51,7 @@ struct BucketService {
         } catch {
             try await bucket.delete(on: database)
             try BucketHandler.delete(name: bucketName)
+            await BucketVersioningCache.shared.removeBucket(bucketName)
             throw error
         }
     }
