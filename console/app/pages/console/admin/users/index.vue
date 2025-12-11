@@ -31,18 +31,16 @@ const itemsPerPage = ref(10);
 const UCheckbox = resolveComponent("UCheckbox");
 const UBadge = resolveComponent("UBadge");
 const rowSelection = ref<Record<string, boolean>>({});
-const openDeletionModal = ref(false);
 const jwtCookie = useJWTCookie();
 const openUserCreateModal = ref(false);
 const isDeleting = ref(false);
 const toast = useToast();
 const UDropdownMenu = resolveComponent("UDropdownMenu");
 const UButton = resolveComponent("UButton");
+const { confirm } = useConfirmDialog();
 
 const selectedUserForEdit = ref<User | null>(null);
 const openUserEditModal = ref(false);
-const selectedUserForDelete = ref<User | null>(null);
-const openSingleDeleteModal = ref(false);
 
 const {
     data: fetchResponse,
@@ -125,8 +123,7 @@ const columns: TableColumn<User>[] = [
                                     icon: "i-lucide-trash-2",
                                     color: "error" as const,
                                     onSelect() {
-                                        selectedUserForDelete.value = row.original;
-                                        openSingleDeleteModal.value = true;
+                                        deleteSingleUser(row.original);
                                     },
                                 },
                             ],
@@ -158,9 +155,15 @@ function onSelect(e: Event, row: TableRow<User>) {}
 
 async function deleteMany() {
     const items = selectedItems.value;
-    if (items.length === 0) {
-        return;
-    }
+    if (items.length === 0) return;
+
+    const confirmed = await confirm({
+        title: `Delete ${items.length} User${items.length !== 1 ? "s" : ""}`,
+        message: `Do you really want to delete ${items.length} user${items.length !== 1 ? "s" : ""}? All data from the user will be deleted. This action cannot be undone.`,
+        confirmLabel: "Delete",
+    });
+
+    if (!confirmed) return;
 
     isDeleting.value = true;
     let successCount = 0;
@@ -216,11 +219,14 @@ async function deleteMany() {
     }
 }
 
-async function deleteSingleUser() {
-    const user = selectedUserForDelete.value;
-    if (!user) {
-        return;
-    }
+async function deleteSingleUser(user: User) {
+    const confirmed = await confirm({
+        title: "Delete User",
+        message: `Do you really want to delete '${user.name}'? All buckets and data from this user will be deleted. This action cannot be undone.`,
+        confirmLabel: "Delete",
+    });
+
+    if (!confirmed) return;
 
     isDeleting.value = true;
 
@@ -250,13 +256,10 @@ async function deleteSingleUser() {
         });
     } finally {
         isDeleting.value = false;
-        selectedUserForDelete.value = null;
     }
 }
 </script>
 <template>
-    <ConfirmationDialog confirmLabel="Delete" v-model:isShowing="openDeletionModal" :title="`Delete ${selectedItems.length} User${selectedItems.length !== 1 ? 's' : ''}`" :onConfirm="deleteMany" :message="`Do you really want to delete ${selectedItems.length} user${selectedItems.length !== 1 ? 's' : ''}? All data from the user will be deleted. This action cannot be undone.`" />
-    <ConfirmationDialog confirmLabel="Delete" v-model:isShowing="openSingleDeleteModal" :title="`Delete User`" :onConfirm="deleteSingleUser" :message="`Do you really want to delete '${selectedUserForDelete?.name}'? All buckets and data from this user will be deleted. This action cannot be undone.`" />
     <EditUserModal v-if="selectedUserForEdit && openUserEditModal" v-model:open="openUserEditModal" :user="selectedUserForEdit" />
 
     <UDashboardPanel
@@ -267,7 +270,7 @@ async function deleteSingleUser() {
         <template #header>
             <UDashboardNavbar title="Users">
                 <template #right>
-                    <UButton @click="openDeletionModal = !openDeletionModal" v-if="!Object.values(rowSelection).every((selected) => !selected)" color="error">
+                    <UButton @click="deleteMany" v-if="!Object.values(rowSelection).every((selected) => !selected)" color="error" :loading="isDeleting">
                         <template #trailing>
                             <UBadge color="neutral" variant="subtle" size="sm">{{ Object.values(rowSelection).length }}</UBadge>
                         </template>

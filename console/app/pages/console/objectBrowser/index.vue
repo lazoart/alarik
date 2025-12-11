@@ -29,16 +29,14 @@ const openBucketCreateModal = ref(false);
 const page = ref(1);
 const itemsPerPage = ref(100);
 const rowSelection = ref<Record<string, boolean>>({});
-const openDeletionModal = ref(false);
 const jwtCookie = useJWTCookie();
 const fileInput = ref<HTMLInputElement | null>(null);
 const folderInput = ref<HTMLInputElement | null>(null);
-const isUploading = ref(false);
-const isDeleting = ref(false);
-const isDownloading = ref(false);
-const toast = useToast();
 const openDetailModal = ref(false);
 const selectedObject = ref<BrowserItem | null>(null);
+
+const { isDeleting, isDownloading, isUploading, deleteObjects, downloadObjects, downloadSingleObject, uploadFiles, uploadFolder } = useObjectService();
+const { confirm } = useConfirmDialog();
 
 // Navigation state
 const currentBucket = ref<string>("");
@@ -201,7 +199,7 @@ const columns: TableColumn<BrowserItem>[] = [
             }),
     },
     {
-        accessorKey: "key",
+        accessorKey: "name",
         header: "Name",
         cell: ({ row }) => {
             const item = row.original;
@@ -243,6 +241,40 @@ const columns: TableColumn<BrowserItem>[] = [
             return new Date(row.original.lastModified).toLocaleString();
         },
     },
+    {
+        accessorKey: "actionButtons",
+        header: "Actions",
+        cell: ({ row }) => {
+            const item = row.original;
+
+            if (item.isBucket || item.isFolder) {
+                return;
+            }
+
+            return h("div", { class: "flex flex-row items-center gap-2" }, [
+                h(resolveComponent("UButton"), {
+                    label: "Download",
+                    variant: "subtle",
+                    color: "neutral",
+                    icon: "i-lucide-download",
+                    onClick: async (e: Event) => {
+                        e.stopPropagation();
+                        await downloadSingleObject(currentBucket.value, item.key);
+                    },
+                }),
+                h(resolveComponent("UButton"), {
+                    label: "Delete",
+                    variant: "subtle",
+                    color: "error",
+                    icon: "i-lucide-trash",
+                    onClick: (e: Event) => {
+                        e.stopPropagation();
+                        handleSingleDelete(item);
+                    },
+                }),
+            ]);
+        },
+    },
 ];
 
 function onSelect(e: Event, row: TableRow<BrowserItem>) {
@@ -266,150 +298,32 @@ function onSelect(e: Event, row: TableRow<BrowserItem>) {
 
 async function deleteMany() {
     const items = selectedItems.value;
-    if (items.length === 0) {
-        return;
-    }
+    if (items.length === 0) return;
 
-    isDeleting.value = true;
-    let successCount = 0;
-    let errorCount = 0;
-    let skippedBuckets = 0;
+    const { fileCount, folderCount, total } = deletionCounts.value;
+    const message = fileCount > 0 && folderCount > 0 ? `Do you really want to delete ${fileCount} file${fileCount !== 1 ? "s" : ""} and ${folderCount} folder${folderCount !== 1 ? "s" : ""}? This action cannot be undone.` : folderCount > 0 ? `Do you really want to delete ${folderCount} folder${folderCount !== 1 ? "s" : ""} and all files within? This action cannot be undone.` : `Do you really want to delete ${fileCount} file${fileCount !== 1 ? "s" : ""}? This action cannot be undone.`;
 
-    try {
-        for (const item of items) {
-            // Skip buckets - they should be deleted through bucket management
-            if (item.isBucket) {
-                skippedBuckets++;
-                continue;
-            }
+    const confirmed = await confirm({
+        title: `Delete ${total} Item${total !== 1 ? "s" : ""}`,
+        message,
+        confirmLabel: "Delete",
+    });
 
-            try {
-                await $fetch(`${useRuntimeConfig().public.apiBaseUrl}/api/v1/objects`, {
-                    method: "DELETE",
-                    headers: {
-                        Authorization: `Bearer ${jwtCookie.value}`,
-                    },
-                    params: {
-                        bucket: currentBucket.value,
-                        key: item.key,
-                    },
-                });
-                successCount++;
-            } catch (error) {
-                console.error(`Failed to delete ${item.key}:`, error);
-                errorCount++;
-            }
-        }
+    if (!confirmed) return;
 
-        // Refresh the object list
-        await refresh();
-
-        // Clear selection
-        rowSelection.value = {};
-
-        // Show appropriate toast based on results
-        if (skippedBuckets > 0) {
-            toast.add({
-                title: "Buckets Cannot Be Deleted Here",
-                description: `${skippedBuckets} bucket${skippedBuckets !== 1 ? "s" : ""} skipped. Use bucket management to delete buckets.`,
-                icon: "i-lucide-alert-triangle",
-                color: "warning",
-            });
-        } else if (errorCount === 0) {
-            toast.add({
-                title: "Deletion Successful",
-                description: `${successCount} item${successCount !== 1 ? "s" : ""} deleted successfully`,
-                icon: "i-lucide-circle-check",
-                color: "success",
-            });
-        } else if (successCount === 0) {
-            toast.add({
-                title: "Deletion Failed",
-                description: `All ${errorCount} item${errorCount !== 1 ? "s" : ""} failed to delete`,
-                icon: "i-lucide-circle-x",
-                color: "error",
-            });
-        } else {
-            toast.add({
-                title: "Deletion Partially Successful",
-                description: `${successCount} succeeded, ${errorCount} failed`,
-                icon: "i-lucide-alert-triangle",
-                color: "warning",
-            });
-        }
-    } finally {
-        isDeleting.value = false;
-    }
+    await deleteObjects(currentBucket.value, items);
+    await refresh();
+    rowSelection.value = {};
 }
 
 async function downloadSelected() {
     const items = selectedItems.value.filter((item) => !item.isBucket);
-    if (items.length === 0) {
-        return;
-    }
+    if (items.length === 0) return;
 
-    isDownloading.value = true;
-
-    try {
-        const keys = items.map((item) => item.key);
-
-        const response = await fetch(`${useRuntimeConfig().public.apiBaseUrl}/api/v1/objects/download`, {
-            method: "POST",
-            headers: {
-                Authorization: `Bearer ${jwtCookie.value}`,
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-                bucket: currentBucket.value,
-                keys: keys,
-            }),
-        });
-
-        if (!response.ok) {
-            throw new Error(`Download failed: ${response.statusText}`);
-        }
-
-        // Get the blob from the response
-        const blob = await response.blob();
-
-        // Get filename from Content-Disposition header or use default
-        const contentDisposition = response.headers.get("Content-Disposition");
-        let filename = "download";
-        if (contentDisposition) {
-            const filenameMatch = contentDisposition.match(/filename="?(.+?)"?$/);
-            if (filenameMatch && filenameMatch[1]) {
-                filename = filenameMatch[1];
-            }
-        }
-
-        // Create a download link and trigger it
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-
-        // Clear selection
+    const keys = items.map((item) => item.key);
+    const success = await downloadObjects(currentBucket.value, keys);
+    if (success) {
         rowSelection.value = {};
-
-        toast.add({
-            title: "Download Started",
-            description: `Downloading ${items.length} item${items.length !== 1 ? "s" : ""}`,
-            icon: "i-lucide-download",
-            color: "success",
-        });
-    } catch (err: any) {
-        toast.add({
-            title: "Download Failed",
-            description: err.data?.reason ?? "Unknown error",
-            icon: "i-lucide-circle-x",
-            color: "error",
-        });
-    } finally {
-        isDownloading.value = false;
     }
 }
 
@@ -424,149 +338,39 @@ function triggerFolderUpload() {
 async function handleFileUpload(event: Event) {
     const input = event.target as HTMLInputElement;
     const files = input.files;
-
     if (!files || files.length === 0) return;
 
-    isUploading.value = true;
-    let successCount = 0;
-    let errorCount = 0;
-
-    try {
-        for (const file of Array.from(files)) {
-            try {
-                const formData = new FormData();
-                formData.append("data", file, file.name);
-
-                await $fetch(`${useRuntimeConfig().public.apiBaseUrl}/api/v1/objects`, {
-                    method: "POST",
-                    headers: {
-                        Authorization: `Bearer ${jwtCookie.value}`,
-                    },
-                    params: {
-                        bucket: currentBucket.value,
-                        ...(currentPrefix.value.length > 0 && { prefix: currentPrefix.value }),
-                    },
-                    body: formData,
-                });
-                successCount++;
-            } catch (fileError) {
-                console.error(`Failed to upload ${file.name}:`, fileError);
-                errorCount++;
-            }
-        }
-
-        // Refresh the object list
-        await refresh();
-
-        // Show appropriate toast based on results
-        if (errorCount === 0) {
-            toast.add({
-                title: "Upload Successful",
-                description: `${successCount} file${successCount !== 1 ? "s" : ""} uploaded successfully`,
-                icon: "i-lucide-circle-check",
-                color: "success",
-            });
-        } else if (successCount === 0) {
-            toast.add({
-                title: "Upload Failed",
-                description: `All ${errorCount} file${errorCount !== 1 ? "s" : ""} failed to upload`,
-                icon: "i-lucide-circle-x",
-                color: "error",
-            });
-        } else {
-            toast.add({
-                title: "Upload Partially Successful",
-                description: `${successCount} succeeded, ${errorCount} failed`,
-                icon: "i-lucide-alert-triangle",
-                color: "warning",
-            });
-        }
-
-        // Clear the file input
-        if (input) input.value = "";
-    } finally {
-        isUploading.value = false;
-    }
+    await uploadFiles(currentBucket.value, currentPrefix.value, files);
+    await refresh();
+    if (input) input.value = "";
 }
 
 async function handleFolderUpload(event: Event) {
     const input = event.target as HTMLInputElement;
     const files = input.files;
-
     if (!files || files.length === 0) return;
 
-    isUploading.value = true;
-    let successCount = 0;
-    let errorCount = 0;
+    await uploadFolder(currentBucket.value, currentPrefix.value, files);
+    await refresh();
+    if (input) input.value = "";
+}
 
-    try {
-        for (const file of Array.from(files)) {
-            try {
-                // Get the relative path from the file's webkitRelativePath
-                const relativePath = (file as any).webkitRelativePath || file.name;
+async function handleSingleDelete(item: BrowserItem) {
+    const fileName = item.key.split("/").pop() || item.key;
+    const confirmed = await confirm({
+        title: "Delete File",
+        message: `Do you really want to delete "${fileName}"? This action cannot be undone.`,
+        confirmLabel: "Delete",
+    });
 
-                const formData = new FormData();
-                formData.append("data", file, file.name);
+    if (!confirmed) return;
 
-                // Combine current prefix with the file's relative path
-                const fullPrefix = currentPrefix.value + relativePath.substring(0, relativePath.lastIndexOf("/") + 1);
-
-                await $fetch(`${useRuntimeConfig().public.apiBaseUrl}/api/v1/objects`, {
-                    method: "POST",
-                    headers: {
-                        Authorization: `Bearer ${jwtCookie.value}`,
-                    },
-                    params: {
-                        bucket: currentBucket.value,
-                        prefix: fullPrefix,
-                    },
-                    body: formData,
-                });
-                successCount++;
-            } catch (fileError) {
-                console.error(`Failed to upload ${file.name}:`, fileError);
-                errorCount++;
-            }
-        }
-
-        // Refresh the object list
-        await refresh();
-
-        // Show appropriate toast based on results
-        if (errorCount === 0) {
-            toast.add({
-                title: "Upload Successful",
-                description: `${successCount} file${successCount !== 1 ? "s" : ""} uploaded successfully`,
-                icon: "i-lucide-circle-check",
-                color: "success",
-            });
-        } else if (successCount === 0) {
-            toast.add({
-                title: "Upload Failed",
-                description: `All ${errorCount} file${errorCount !== 1 ? "s" : ""} failed to upload`,
-                icon: "i-lucide-circle-x",
-                color: "error",
-            });
-        } else {
-            toast.add({
-                title: "Upload Partially Successful",
-                description: `${successCount} succeeded, ${errorCount} failed`,
-                icon: "i-lucide-alert-triangle",
-                color: "warning",
-            });
-        }
-
-        // Clear the folder input
-        if (input) input.value = "";
-    } finally {
-        isUploading.value = false;
-    }
+    await deleteObjects(currentBucket.value, [item]);
+    await refresh();
 }
 </script>
 <template>
     <ObjectDetailModal v-model:open="openDetailModal" :item="selectedObject" :bucketName="currentBucket" @versionDeleted="refresh" />
-
-    <ConfirmationDialog confirmLabel="Delete" v-model:isShowing="openDeletionModal" :title="`Delete ${deletionCounts.total} Item${deletionCounts.total !== 1 ? 's' : ''}`" :onConfirm="deleteMany" :message="deletionCounts.fileCount > 0 && deletionCounts.folderCount > 0 ? `Do you really want to delete ${deletionCounts.fileCount} file${deletionCounts.fileCount !== 1 ? 's' : ''} and ${deletionCounts.folderCount} folder${deletionCounts.folderCount !== 1 ? 's' : ''}? This action cannot be undone.` : deletionCounts.folderCount > 0 ? `Do you really want to delete ${deletionCounts.folderCount} folder${deletionCounts.folderCount !== 1 ? 's' : ''} and all files within? This action cannot be undone.` : `Do you really want to delete ${deletionCounts.fileCount} file${deletionCounts.fileCount !== 1 ? 's' : ''}? This action cannot be undone.`" />
 
     <UDashboardPanel
         :ui="{
@@ -576,7 +380,7 @@ async function handleFolderUpload(event: Event) {
         <template #header>
             <UDashboardNavbar title="Object Browser">
                 <template #right>
-                    <UButton @click="openDeletionModal = !openDeletionModal" v-if="!Object.values(rowSelection).every((selected) => !selected)" icon="i-lucide-trash" color="error">
+                    <UButton @click="deleteMany" v-if="!Object.values(rowSelection).every((selected) => !selected)" icon="i-lucide-trash" color="error" :loading="isDeleting">
                         <template #trailing>
                             <UBadge color="neutral" variant="subtle" size="sm">{{ Object.values(rowSelection).length }}</UBadge>
                         </template>

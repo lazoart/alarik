@@ -31,11 +31,11 @@ const itemsPerPage = ref(10);
 const UCheckbox = resolveComponent("UCheckbox");
 const UBadge = resolveComponent("UBadge");
 const rowSelection = ref<Record<string, boolean>>({});
-const openDeletionModal = ref(false);
 const jwtCookie = useJWTCookie();
 const openAccessKeyCreateModal = ref(false);
 const isDeleting = ref(false);
 const toast = useToast();
+const { confirm } = useConfirmDialog();
 
 const {
     data: fetchResponse,
@@ -104,9 +104,15 @@ function onSelect(e: Event, row: TableRow<AccessKey>) {
 
 async function deleteMany() {
     const items = selectedItems.value;
-    if (items.length === 0) {
-        return;
-    }
+    if (items.length === 0) return;
+
+    const confirmed = await confirm({
+        title: `Delete ${items.length} Access Key${items.length !== 1 ? "s" : ""}`,
+        message: `Do you really want to delete ${items.length} access key${items.length !== 1 ? "s" : ""}? This action cannot be undone.`,
+        confirmLabel: "Delete",
+    });
+
+    if (!confirmed) return;
 
     isDeleting.value = true;
     let successCount = 0;
@@ -163,8 +169,6 @@ async function deleteMany() {
 }
 </script>
 <template>
-    <ConfirmationDialog confirmLabel="Delete" v-model:isShowing="openDeletionModal" :title="`Delete ${selectedItems.length} Access Key${selectedItems.length !== 1 ? 's' : ''}`" :onConfirm="deleteMany" :message="`Do you really want to delete ${selectedItems.length} access key${selectedItems.length !== 1 ? 's' : ''}? This action cannot be undone.`" />
-
     <UDashboardPanel
         :ui="{
             body: '!p-0',
@@ -173,7 +177,7 @@ async function deleteMany() {
         <template #header>
             <UDashboardNavbar title="Access Keys">
                 <template #right>
-                    <UButton @click="openDeletionModal = !openDeletionModal" v-if="!Object.values(rowSelection).every((selected) => !selected)" color="error">
+                    <UButton @click="deleteMany" v-if="!Object.values(rowSelection).every((selected) => !selected)" color="error" :loading="isDeleting">
                         <template #trailing>
                             <UBadge color="neutral" variant="subtle" size="sm">{{ Object.values(rowSelection).length }}</UBadge>
                         </template>
