@@ -18,6 +18,10 @@ import Fluent
 import Vapor
 import XMLCoder
 
+#if os(Linux)
+    import Glibc
+#endif
+
 struct InternalAdminController: RouteCollection {
 
     struct StorageStats: Content {
@@ -204,26 +208,8 @@ struct InternalAdminController: RouteCollection {
 
         let storageURL = URL(fileURLWithPath: BucketHandler.rootPath)
 
-        let availableBytes: Int64
-        let totalBytes: Int64
-
-        do {
-            let values = try storageURL.resourceValues(forKeys: [
-                .volumeAvailableCapacityForImportantUsageKey,
-                .volumeTotalCapacityKey,
-            ])
-            availableBytes = Int64(values.volumeAvailableCapacityForImportantUsage ?? 0)
-            totalBytes = Int64(values.volumeTotalCapacity ?? 0)
-        } catch {
-            // Fallback: try the parent directory if storage path doesn't exist yet
-            let parentURL = storageURL.deletingLastPathComponent()
-            let values = try parentURL.resourceValues(forKeys: [
-                .volumeAvailableCapacityForImportantUsageKey,
-                .volumeTotalCapacityKey,
-            ])
-            availableBytes = Int64(values.volumeAvailableCapacityForImportantUsage ?? 0)
-            totalBytes = Int64(values.volumeTotalCapacity ?? 0)
-        }
+        // Get disk space info
+        let (totalBytes, availableBytes) = Self.getDiskSpace(for: storageURL)
 
         let usedBytes = totalBytes - availableBytes
 
@@ -242,6 +228,36 @@ struct InternalAdminController: RouteCollection {
             bucketCount: bucketCount,
             userCount: userCount
         )
+    }
+
+    private static func getDiskSpace(for url: URL) -> (total: Int64, available: Int64) {
+        let path =
+            FileManager.default.fileExists(atPath: url.path)
+            ? url.path
+            : url.deletingLastPathComponent().path
+
+        #if os(Linux)
+            var stat = statvfs()
+            guard statvfs(path, &stat) == 0 else {
+                return (0, 0)
+            }
+            let blockSize = UInt64(stat.f_frsize)
+            let totalBytes = Int64(UInt64(stat.f_blocks) * blockSize)
+            let availableBytes = Int64(UInt64(stat.f_bavail) * blockSize)
+            return (totalBytes, availableBytes)
+        #else
+            do {
+                let values = try URL(fileURLWithPath: path).resourceValues(forKeys: [
+                    .volumeAvailableCapacityForImportantUsageKey,
+                    .volumeTotalCapacityKey,
+                ])
+                let total = Int64(values.volumeTotalCapacity ?? 0)
+                let available = Int64(values.volumeAvailableCapacityForImportantUsage ?? 0)
+                return (total, available)
+            } catch {
+                return (0, 0)
+            }
+        #endif
     }
 
     private static func calculateDirectorySize(at url: URL) -> Int64 {
