@@ -52,6 +52,42 @@ struct InternalAdminController: RouteCollection {
 
         routes.grouped("admin")
             .get("buckets", use: self.listBuckets)
+
+        routes.grouped("admin").grouped("buckets").grouped(":bucketName").delete(
+            use: self.deleteBucket)
+    }
+
+    @Sendable
+    func deleteBucket(req: Request) async throws -> HTTPStatus {
+        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
+
+        guard let bucketName = req.parameters.get("bucketName") else {
+            throw Abort(.badRequest, reason: "Missing bucket name")
+        }
+
+        guard let fetchedAdminUser: User = try await User.find(sessionToken.userId, on: req.db)
+        else {
+            throw Abort(.unauthorized, reason: "User not found")
+        }
+
+        guard fetchedAdminUser.isAdmin else {
+            throw Abort(.unauthorized, reason: "User not admin")
+        }
+
+        guard
+            let bucket =
+                try await Bucket.query(on: req.db)
+                .filter(\.$name == bucketName)
+                .with(\.$user)
+                .first()
+        else {
+            throw Abort(.notFound, reason: "Bucket not found")
+        }
+
+        try await BucketService.delete(
+            on: req.db, bucketName: bucketName, userId: bucket.user.id!, force: true)
+
+        return .noContent
     }
 
     @Sendable

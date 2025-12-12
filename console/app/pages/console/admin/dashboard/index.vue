@@ -133,7 +133,7 @@ const alarikOfUsedPercent = computed(() => {
                                     <div class="text-sm text-muted">Total buckets</div>
                                 </div>
                             </div>
-                            <UButton to="/console/buckets" color="neutral" variant="subtle" trailing-icon="i-lucide-arrow-right">Manage</UButton>
+                            <UButton to="/console/admin/buckets" color="neutral" variant="subtle" trailing-icon="i-lucide-arrow-right">Manage</UButton>
                         </div>
                     </UCard>
 

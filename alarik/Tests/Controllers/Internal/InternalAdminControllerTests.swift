@@ -645,4 +645,201 @@ struct InternalAdminControllerTests {
                 })
         }
     }
+
+    @Test("Delete bucket as admin - should pass")
+    func testDeleteBucket() async throws {
+        try await withApp { app in
+            let token = try await loginDefaultAdminUser(app)
+
+            // Create a bucket for admin user
+            let adminUser = try await User.query(on: app.db)
+                .filter(\.$username == "alarik")
+                .first()
+            let bucket = Bucket(name: "admin-delete-test-bucket", userId: adminUser!.id!)
+            try await bucket.save(on: app.db)
+            try BucketHandler.create(name: "admin-delete-test-bucket")
+
+            let bucketURL = BucketHandler.bucketURL(for: "admin-delete-test-bucket")
+
+            // Verify bucket exists on disk
+            #expect(FileManager.default.fileExists(atPath: bucketURL.path))
+
+            // Delete the bucket
+            try await app.test(
+                .DELETE, "/api/v1/admin/buckets/admin-delete-test-bucket",
+                beforeRequest: { req in
+                    req.headers.bearerAuthorization = BearerAuthorization(token: token)
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .noContent)
+                })
+
+            // Verify bucket is deleted from disk
+            #expect(!FileManager.default.fileExists(atPath: bucketURL.path))
+
+            // Verify bucket is deleted from DB
+            let deletedBucket = try await Bucket.query(on: app.db)
+                .filter(\.$name == "admin-delete-test-bucket")
+                .first()
+            #expect(deletedBucket == nil)
+        }
+    }
+
+    @Test("Delete bucket as non admin - should fail")
+    func testDeleteBucketAsNonAdmin() async throws {
+        try await withApp { app in
+            let token = try await createUserAndLogin(app)
+
+            // Create a bucket for admin user
+            let adminUser = try await User.query(on: app.db)
+                .filter(\.$username == "alarik")
+                .first()
+            let bucket = Bucket(name: "non-admin-delete-test-bucket", userId: adminUser!.id!)
+            try await bucket.save(on: app.db)
+            try BucketHandler.create(name: "non-admin-delete-test-bucket")
+
+            try await app.test(
+                .DELETE, "/api/v1/admin/buckets/non-admin-delete-test-bucket",
+                beforeRequest: { req in
+                    req.headers.bearerAuthorization = BearerAuthorization(token: token)
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .unauthorized)
+                })
+
+            // Verify bucket still exists
+            let existingBucket = try await Bucket.query(on: app.db)
+                .filter(\.$name == "non-admin-delete-test-bucket")
+                .first()
+            #expect(existingBucket != nil)
+        }
+    }
+
+    @Test("Delete non-existent bucket - should fail")
+    func testDeleteNonExistentBucket() async throws {
+        try await withApp { app in
+            let token = try await loginDefaultAdminUser(app)
+
+            try await app.test(
+                .DELETE, "/api/v1/admin/buckets/non-existent-bucket-12345",
+                beforeRequest: { req in
+                    req.headers.bearerAuthorization = BearerAuthorization(token: token)
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .notFound)
+                })
+        }
+    }
+
+    @Test("Delete bucket without auth - should fail")
+    func testDeleteBucketWithoutAuth() async throws {
+        try await withApp { app in
+            try await app.test(
+                .DELETE, "/api/v1/admin/buckets/some-bucket",
+                afterResponse: { res async throws in
+                    #expect(res.status == .unauthorized)
+                })
+        }
+    }
+
+    @Test("Delete bucket owned by another user as admin - should pass")
+    func testDeleteBucketOwnedByAnotherUser() async throws {
+        try await withApp { app in
+            let adminToken = try await loginDefaultAdminUser(app)
+
+            // Create a non-admin user
+            let createDTO = User.Create(
+                name: "Bucket Owner",
+                username: "bucketowner@example.com",
+                password: "SecurePass123!",
+                isAdmin: false
+            )
+
+            var userId: UUID?
+            try await app.test(
+                .POST, "/api/v1/admin/users",
+                beforeRequest: { req in
+                    req.headers.bearerAuthorization = BearerAuthorization(token: adminToken)
+                    try req.content.encode(createDTO)
+                },
+                afterResponse: { res async throws in
+                    let user = try res.content.decode(User.ResponseDTO.self)
+                    userId = user.id
+                })
+
+            // Create a bucket for the non-admin user
+            let bucket = Bucket(name: "other-user-bucket", userId: userId!)
+            try await bucket.save(on: app.db)
+            try BucketHandler.create(name: "other-user-bucket")
+
+            let bucketURL = BucketHandler.bucketURL(for: "other-user-bucket")
+
+            // Verify bucket exists
+            #expect(FileManager.default.fileExists(atPath: bucketURL.path))
+
+            // Admin deletes the bucket
+            try await app.test(
+                .DELETE, "/api/v1/admin/buckets/other-user-bucket",
+                beforeRequest: { req in
+                    req.headers.bearerAuthorization = BearerAuthorization(token: adminToken)
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .noContent)
+                })
+
+            // Verify bucket is deleted from disk
+            #expect(!FileManager.default.fileExists(atPath: bucketURL.path))
+
+            // Verify bucket is deleted from DB
+            let deletedBucket = try await Bucket.query(on: app.db)
+                .filter(\.$name == "other-user-bucket")
+                .first()
+            #expect(deletedBucket == nil)
+        }
+    }
+
+    @Test("Delete bucket with objects - should delete bucket and contents")
+    func testDeleteBucketWithObjects() async throws {
+        try await withApp { app in
+            let token = try await loginDefaultAdminUser(app)
+
+            // Create a bucket
+            let adminUser = try await User.query(on: app.db)
+                .filter(\.$username == "alarik")
+                .first()
+            let bucket = Bucket(name: "bucket-with-objects", userId: adminUser!.id!)
+            try await bucket.save(on: app.db)
+            try BucketHandler.create(name: "bucket-with-objects")
+
+            // Add files to the bucket
+            let bucketURL = BucketHandler.bucketURL(for: "bucket-with-objects")
+            try "content1".write(
+                to: bucketURL.appendingPathComponent("file1.txt"),
+                atomically: true,
+                encoding: .utf8
+            )
+            try "content2".write(
+                to: bucketURL.appendingPathComponent("file2.txt"),
+                atomically: true,
+                encoding: .utf8
+            )
+
+            // Verify files exist
+            #expect(FileManager.default.fileExists(atPath: bucketURL.appendingPathComponent("file1.txt").path))
+            #expect(FileManager.default.fileExists(atPath: bucketURL.appendingPathComponent("file2.txt").path))
+
+            // Delete the bucket
+            try await app.test(
+                .DELETE, "/api/v1/admin/buckets/bucket-with-objects",
+                beforeRequest: { req in
+                    req.headers.bearerAuthorization = BearerAuthorization(token: token)
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .noContent)
+                })
+
+            // Verify bucket and contents are deleted from disk
+            #expect(!FileManager.default.fileExists(atPath: bucketURL.path))
+        }
+    }
 }

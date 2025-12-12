@@ -63,8 +63,8 @@ const items = computed<NavigationMenuItem[][]>(() => {
             {
                 label: "Buckets",
                 icon: "i-lucide-cylinder",
-                to: "/console/buckets",
-                active: route.path.startsWith("/console/buckets"),
+                to: "/console/admin/buckets",
+                active: route.path.startsWith("/console/admin/buckets"),
                 disabled: !user.value.isAdmin,
             },
             {

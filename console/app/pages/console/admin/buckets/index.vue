@@ -117,7 +117,7 @@ async function deleteMany() {
 
     const confirmed = await confirm({
         title: `Delete ${items.length} Bucket${items.length !== 1 ? "s" : ""}`,
-        message: `Do you really want to delete ${items.length} bucket${items.length !== 1 ? "s" : ""}? Buckets must be empty to be deleted. This action cannot be undone.`,
+        message: `Do you really want to delete ${items.length} bucket${items.length !== 1 ? "s" : ""}? All Objects inside the Bucket will be deleted. This action cannot be undone.`,
         confirmLabel: "Delete",
     });
 
@@ -131,7 +131,7 @@ async function deleteMany() {
     try {
         for (const item of items) {
             try {
-                await $fetch(`${useRuntimeConfig().public.apiBaseUrl}/api/v1/buckets/${item.name}`, {
+                await $fetch(`${useRuntimeConfig().public.apiBaseUrl}/api/v1/admin/buckets/${item.name}`, {
                     method: "DELETE",
                     headers: {
                         Authorization: `Bearer ${jwtCookie.value}`,
