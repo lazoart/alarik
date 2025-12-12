@@ -46,6 +46,11 @@ const previewType = computed(() => {
         return "image";
     }
 
+    // Text files
+    if (type.startsWith("text/") || type === "application/json" || type === "application/xml" || type === "application/javascript" || ["txt", "md", "json", "xml", "html", "css", "js", "ts", "vue", "jsx", "tsx", "yaml", "yml", "toml", "ini", "cfg", "conf", "sh", "bash", "py", "rb", "go", "rs", "java", "kt", "c", "cpp", "h", "hpp", "cs", "sql", "log", "env", "swift"].includes(ext)) {
+        return "text";
+    }
+
     // Videos
     if (type.startsWith("video/") || ["mp4", "webm", "ogg", "mov"].includes(ext)) {
         return "video";
@@ -59,11 +64,6 @@ const previewType = computed(() => {
     // PDF
     if (type === "application/pdf" || ext === "pdf") {
         return "pdf";
-    }
-
-    // Text files
-    if (type.startsWith("text/") || type === "application/json" || type === "application/xml" || type === "application/javascript" || ["txt", "md", "json", "xml", "html", "css", "js", "ts", "vue", "jsx", "tsx", "yaml", "yml", "toml", "ini", "cfg", "conf", "sh", "bash", "py", "rb", "go", "rs", "java", "kt", "c", "cpp", "h", "hpp", "cs", "sql", "log", "env"].includes(ext)) {
-        return "text";
     }
 
     return "unsupported";
