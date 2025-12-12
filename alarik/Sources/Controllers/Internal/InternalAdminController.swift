@@ -34,16 +34,43 @@ struct InternalAdminController: RouteCollection {
     }
 
     func boot(routes: any RoutesBuilder) throws {
+
         routes.grouped("admin").grouped("users")
             .get(use: listUsers)
+
         routes.grouped("admin").grouped("users")
             .post(use: createUser)
+
         routes.grouped("admin").grouped("users")
             .put(use: editUser)
+
         routes.grouped("admin").grouped("users")
             .delete(":userId", use: deleteUser)
+
         routes.grouped("admin")
             .get("storageStats", use: getStorageStats)
+
+        routes.grouped("admin")
+            .get("buckets", use: self.listBuckets)
+    }
+
+    @Sendable
+    func listBuckets(req: Request) async throws -> Page<Bucket> {
+        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
+
+        guard let fetchedAdminUser: User = try await User.find(sessionToken.userId, on: req.db)
+        else {
+            throw Abort(.unauthorized, reason: "User not found")
+        }
+
+        guard fetchedAdminUser.isAdmin else {
+            throw Abort(.unauthorized, reason: "User not admin")
+        }
+
+        return try await Bucket.query(on: req.db)
+            .sort(\.$creationDate, .descending)
+            .with(\.$user)
+            .paginate(for: req)
     }
 
     @Sendable

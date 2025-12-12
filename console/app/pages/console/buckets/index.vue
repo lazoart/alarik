@@ -41,7 +41,7 @@ const {
     data: fetchResponse,
     status,
     refresh,
-} = await useFetch<Page<Bucket>>(`${useRuntimeConfig().public.apiBaseUrl}/api/v1/buckets`, {
+} = await useFetch<Page<Bucket>>(`${useRuntimeConfig().public.apiBaseUrl}/api/v1/admin/buckets`, {
     params: {
         page: page,
         per: itemsPerPage,
@@ -73,6 +73,13 @@ const columns: TableColumn<Bucket>[] = [
         header: "Name",
         cell: ({ row }) => {
             return row.original.name;
+        },
+    },
+    {
+        accessorKey: "owner",
+        header: "Owner",
+        cell: ({ row }) => {
+            return row.original.user?.username;
         },
     },
     {
