@@ -50,7 +50,8 @@ public func configure(_ app: Application) async throws {
 
     let cors: CORSMiddleware = CORSMiddleware(
         configuration: .init(
-            allowedOrigin: .any([consoleBaseUrl]),
+            allowedOrigin: .any(
+                [consoleBaseUrl] + additionalCorsOrigins(consoleBaseUrl: consoleBaseUrl)),
             allowedMethods: [.GET, .POST, .PUT, .OPTIONS, .DELETE, .PATCH],
             allowedHeaders: [
                 .accept,
@@ -102,4 +103,30 @@ public func configure(_ app: Application) async throws {
             }
         }
     }
+}
+
+/// This makes sure, that we always allow the console localhost in the CORS middleware.
+private func additionalCorsOrigins(consoleBaseUrl: String) -> [String] {
+    if consoleBaseUrl.lowercased() == "http://localhost:3000" {
+        return [
+            "http://0.0.0.0:3000",
+            "http://127.0.0.1:3000",
+        ]
+    } else if consoleBaseUrl.lowercased() == "http://0.0.0.0:3000" {
+        return [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ]
+    } else if consoleBaseUrl.lowercased() == "http://127.0.0.0:3000" {
+        return [
+            "http://localhost:3000",
+            "http://0.0.0.0:3000",
+        ]
+    }
+
+    return [
+        "http://localhost:3000",
+        "http://0.0.0.0:3000",
+        "http://127.0.0.1:3000",
+    ]
 }
