@@ -21,6 +21,7 @@ const props = withDefaults(
         bucket: string;
         objectKey: string;
         contentType?: string;
+        versionId?: string;
     }>(),
     {
         open: false,
@@ -114,6 +115,7 @@ async function loadPreview() {
             body: JSON.stringify({
                 bucket: props.bucket,
                 keys: [props.objectKey],
+                ...(props.versionId && { versionId: props.versionId }),
             }),
         });
 

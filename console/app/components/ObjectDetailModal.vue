@@ -34,6 +34,8 @@ const toast = useToast();
 const versions = ref<BrowserItem[]>([]);
 const loadingVersions = ref(false);
 const deletingVersionId = ref<string | null>(null);
+const openPreviewModal = ref(false);
+const previewObject = ref<BrowserItem | null>(null);
 
 watch(
     () => props.open,
@@ -183,6 +185,8 @@ function getVersionStatusBadge(version: BrowserItem) {
 }
 </script>
 <template>
+    <FilePreviewModal :key="previewObject?.key" v-model:open="openPreviewModal" :bucket="props.bucketName" :object-key="previewObject?.key ?? ''" :content-type="previewObject?.contentType" :version-id="previewObject?.versionId" />
+    
     <USlideover v-model:open="open" :title="props.item?.key">
         <slot />
 
@@ -246,6 +250,20 @@ function getVersionStatusBadge(version: BrowserItem) {
                                         </div>
                                     </div>
                                     <div class="flex items-center gap-1">
+                                        <UButton
+                                            v-if="!version.isDeleteMarker"
+                                            icon="i-lucide-eye"
+                                            color="neutral"
+                                            variant="ghost"
+                                            size="xs"
+                                            title="Preview this version"
+                                            @click="
+                                                () => {
+                                                    previewObject = version;
+                                                    openPreviewModal = true;
+                                                }
+                                            "
+                                        />
                                         <UButton v-if="!version.isDeleteMarker" icon="i-lucide-download" color="neutral" variant="ghost" size="xs" title="Download this version" @click="downloadVersion(version.versionId!)" />
                                         <UButton icon="i-lucide-trash-2" color="error" variant="ghost" size="xs" title="Delete this version permanently" :loading="deletingVersionId === version.versionId" @click="deleteVersion(version.versionId!)" />
                                     </div>
