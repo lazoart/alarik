@@ -18,6 +18,8 @@
 
 Alarik is a high-performance, S3-compatible object storage system written in **Swift**, licensed under the **Apache 2.0** license. It aims to deliver exceptional speed, developer-friendly ergonomics, and a modern cloud-native core. See [Documentation](https://alarik.io/docs)
 
+<img src="assets/console_browser_dark.png" />
+
 ## Why Alarik?
 
 Recent shifts in the ecosystem-especially surrounding MinIO-have revealed how fragile it is to depend on a single “reference” implementation for S3-compatible storage. These changes highlighted structural, licensing, and philosophical issues that many teams had long overlooked.
