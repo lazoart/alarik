@@ -1,10 +1,40 @@
 #!/bin/bash
 set -e
 
-VERSION="${1:-1.0.0-alpha-1}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VERSION_FILE="$SCRIPT_DIR/VERSION"
+
+# Read version from VERSION file or use CLI argument
+if [ -n "$1" ]; then
+    VERSION="$1"
+    # Update VERSION file with new version
+    echo "$VERSION" > "$VERSION_FILE"
+else
+    VERSION=$(cat "$VERSION_FILE" | tr -d '\n')
+fi
+
 REGISTRY="ghcr.io/achtungsoftware"
 
 echo "Publishing Alarik $VERSION to $REGISTRY"
+
+# Cross-platform sed in-place edit (macOS requires '' after -i, Linux doesn't)
+sedi() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' "$@"
+    else
+        sed -i "$@"
+    fi
+}
+
+# Update version in Swift Constants.swift
+sedi "s/public let alarikVersion = \".*\"/public let alarikVersion = \"$VERSION\"/" \
+    "$SCRIPT_DIR/alarik/Sources/Global/Constants.swift"
+
+# Update version in Nuxt config
+sedi "s/appVersion: \".*\"/appVersion: \"$VERSION\"/" \
+    "$SCRIPT_DIR/console/nuxt.config.ts"
+
+echo "Updated version strings in source files"
 
 # Login to GHCR (requires GITHUB_TOKEN or gh auth)
 echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin 2>/dev/null || \

@@ -178,7 +178,12 @@ const userMenuItems = computed<DropdownMenuItem[][]>(() => [
     <UDashboardGroup unit="rem">
         <UDashboardSidebar v-model:open="openSidebar" :resizable="false" :ui="{ footer: 'border-t border-default' }">
             <template #header>
-                <Logo size="sm" />
+                <div class="flex flex-row items-center gap-1">
+                    <Logo size="sm" />
+                    <a :href="`https://github.com/achtungsoftware/alarik/releases/tag/${useRuntimeConfig().public.appVersion}`" target="_blank">
+                        <UBadge size="sm" :label="useRuntimeConfig().public.appVersion" variant="subtle" color="neutral" class="rounded-full block" />
+                    </a>
+                </div>
             </template>
 
             <template #default>

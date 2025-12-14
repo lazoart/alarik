@@ -31,6 +31,7 @@ export default defineNuxtConfig({
     },
     runtimeConfig: {
         public: {
+            appVersion: "1.0.0-alpha-9", // Updated by publish.sh
             apiBaseUrl: "http://localhost:8080",
             consoleBaseUrl: "http://localhost:3000",
             allowAccountCreation: false,
