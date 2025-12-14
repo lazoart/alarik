@@ -62,6 +62,10 @@ struct InternalBucketController: RouteCollection {
 
         let create: Bucket.Create = try req.content.decode(Bucket.Create.self)
 
+        if (try await Bucket.query(on: req.db).filter(\.$name == create.name).first()) != nil {
+            throw Abort(.conflict, reason: "The requested bucket name is not available.")
+        }
+
         try await BucketService.create(
             on: req.db, bucketName: create.name, userId: sessionToken.userId,
             versioningEnabled: create.versioningEnabled)
