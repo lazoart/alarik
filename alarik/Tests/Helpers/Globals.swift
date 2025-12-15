@@ -56,7 +56,9 @@ public func loginDefaultAdminUser(_ app: Application) async throws -> String {
     return token
 }
 
-public func createUserAndLogin(_ app: Application, username: String = "test@example.com") async throws -> String {
+public func createUserAndLogin(_ app: Application, username: String = "test@example.com")
+    async throws -> String
+{
     let createDTO = User.Create(
         name: "Test User",
         username: username,
@@ -84,4 +86,44 @@ public func createUserAndLogin(_ app: Application, username: String = "test@exam
         })
 
     return token
+}
+
+public let testAccessKey = "AKIAIOSFODNN7EXAMPLE"
+public let testSecretKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+
+/// Creates an access key for a non-admin user and returns the user ID
+public func createNonAdminUserWithAccessKey(
+    _ app: Application, accessKey: String = "NONNADMINKEY123456",
+    secretKey: String = "nonAdminSecretKey123"
+) async throws -> UUID {
+    // Create a non-admin user
+    let user = User(
+        name: "Non Admin User",
+        username: "nonadmin@example.com",
+        passwordHash: try Bcrypt.hash("TestPass123!"),
+        isAdmin: false
+    )
+    try await user.save(on: app.db)
+
+    let accessKeyModel = AccessKey(
+        userId: user.id!,
+        accessKey: accessKey,
+        secretKey: secretKey
+    )
+    try await accessKeyModel.save(on: app.db)
+
+    // Add to caches
+    await AccessKeySecretKeyMapCache.shared.add(accessKey: accessKey, secretKey: secretKey)
+    await AccessKeyUserMapCache.shared.add(accessKey: accessKey, userId: user.id!)
+
+    return user.id!
+}
+
+/// Helper to set access key headers on a request
+public func setAccessKeyHeaders(
+    _ req: inout TestingHTTPRequest, accessKey: String = testAccessKey,
+    secretKey: String = testSecretKey
+) {
+    req.headers.add(name: "X-Access-Key", value: accessKey)
+    req.headers.add(name: "X-Secret-Key", value: secretKey)
 }

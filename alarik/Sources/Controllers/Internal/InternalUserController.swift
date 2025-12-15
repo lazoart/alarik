@@ -26,27 +26,27 @@ struct InternalUserController: RouteCollection {
             .post(use: login)
 
         routes.grouped("users").grouped("auth")
-            .grouped(SessionToken.authenticator())
+            .grouped(InternalAuthenticator())
             .post(use: auth)
 
         routes.grouped("users").grouped("accessKeys")
-            .grouped(SessionToken.authenticator())
+            .grouped(InternalAuthenticator())
             .get(use: listAccessKeys)
 
         routes.grouped("users")
-            .grouped(SessionToken.authenticator())
+            .grouped(InternalAuthenticator())
             .put(use: editUser)
 
         routes.grouped("users").grouped("accessKeys")
-            .grouped(SessionToken.authenticator())
+            .grouped(InternalAuthenticator())
             .post(use: createAccessKey)
 
         routes.grouped("users").grouped("accessKeys").grouped(":accessKeyId")
-            .grouped(SessionToken.authenticator())
+            .grouped(InternalAuthenticator())
             .delete(use: deleteAccessKey)
 
         routes.grouped("users")
-            .grouped(SessionToken.authenticator())
+            .grouped(InternalAuthenticator())
             .delete(use: deleteUser)
     }
 
@@ -54,12 +54,7 @@ struct InternalUserController: RouteCollection {
     func editUser(req: Request) async throws -> User.ResponseDTO {
         try User.Edit.validate(content: req)
 
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
-
-        guard let user = try await User.find(sessionToken.userId, on: req.db)
-        else {
-            throw Abort(.notFound, reason: "User not found")
-        }
+        let auth = try req.auth.require(AuthenticatedUser.self)
 
         let editUser: User.Edit = try req.content.decode(User.Edit.self)
 
@@ -69,20 +64,20 @@ struct InternalUserController: RouteCollection {
             !currentPassword.isEmpty,
             !newPassword.isEmpty
         {
-            guard try user.verify(password: currentPassword) else {
+            guard try auth.user.verify(password: currentPassword) else {
                 throw Abort(.unauthorized, reason: "Current password is incorrect")
             }
 
             let newPasswordHash = try Bcrypt.hash(newPassword)
             try await User.query(on: req.db)
-                .filter(\.$id == sessionToken.userId)
+                .filter(\.$id == auth.userId)
                 .set(\.$passwordHash, to: newPasswordHash)
                 .update()
         }
 
         do {
             try await User.query(on: req.db)
-                .filter(\.$id == sessionToken.userId)
+                .filter(\.$id == auth.userId)
                 .set(\.$name, to: editUser.name)
                 .set(\.$username, to: editUser.username)
                 .update()
@@ -100,13 +95,13 @@ struct InternalUserController: RouteCollection {
 
     @Sendable
     func createAccessKey(req: Request) async throws -> AccessKey.ResponseDTO {
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
+        let auth = try req.auth.require(AuthenticatedUser.self)
 
         try AccessKey.Create.validate(content: req)
 
         let create: AccessKey.Create = try req.content.decode(AccessKey.Create.self)
         let accessKey: AccessKey = AccessKey(
-            userId: sessionToken.userId, accessKey: create.accessKey, secretKey: create.secretKey,
+            userId: auth.userId, accessKey: create.accessKey, secretKey: create.secretKey,
             expirationDate: create.expirationDate
         )
 
@@ -128,12 +123,12 @@ struct InternalUserController: RouteCollection {
         )
         await AccessKeyUserMapCache.shared.add(
             accessKey: create.accessKey,
-            userId: sessionToken.userId
+            userId: auth.userId
         )
 
         // Map the new access key to all existing buckets for this user
         let userBuckets = try await Bucket.query(on: req.db)
-            .filter(\.$user.$id == sessionToken.userId)
+            .filter(\.$user.$id == auth.userId)
             .all()
 
         for bucket in userBuckets {
@@ -148,7 +143,7 @@ struct InternalUserController: RouteCollection {
 
     @Sendable
     func deleteAccessKey(req: Request) async throws -> HTTPStatus {
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
+        let auth = try req.auth.require(AuthenticatedUser.self)
 
         guard let accessKeyId = req.parameters.get("accessKeyId", as: UUID.self) else {
             throw Abort(.badRequest, reason: "Invalid access key ID.")
@@ -157,7 +152,7 @@ struct InternalUserController: RouteCollection {
         guard
             let accessKey = try await AccessKey.query(on: req.db)
                 .filter(\.$id == accessKeyId)
-                .filter(\.$user.$id == sessionToken.userId)
+                .filter(\.$user.$id == auth.userId)
                 .first()
         else {
             throw Abort(.notFound, reason: "Access key not found.")
@@ -170,10 +165,10 @@ struct InternalUserController: RouteCollection {
 
     @Sendable
     func listAccessKeys(req: Request) async throws -> Page<AccessKey.ResponseDTO> {
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
+        let auth = try req.auth.require(AuthenticatedUser.self)
 
         let page: Page<AccessKey> = try await AccessKey.query(on: req.db)
-            .filter(\.$user.$id == sessionToken.userId)
+            .filter(\.$user.$id == auth.userId)
             .sort(\.$createdAt, .descending)
             .paginate(for: req)
 
@@ -182,13 +177,8 @@ struct InternalUserController: RouteCollection {
 
     @Sendable
     func auth(req: Request) async throws -> User.ResponseDTO {
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
-
-        guard let user: User = try await User.find(sessionToken.userId, on: req.db) else {
-            throw Abort(.unauthorized, reason: "User not found")
-        }
-
-        return user.toResponseDTO()
+        let auth = try req.auth.require(AuthenticatedUser.self)
+        return auth.user.toResponseDTO()
     }
 
     @Sendable
@@ -200,15 +190,11 @@ struct InternalUserController: RouteCollection {
 
     @Sendable
     func deleteUser(req: Request) async throws -> HTTPStatus {
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
-
-        guard let userToDelete = try await User.find(sessionToken.userId, on: req.db) else {
-            throw Abort(.notFound, reason: "User not found")
-        }
+        let auth = try req.auth.require(AuthenticatedUser.self)
 
         // Delete all bucket folders from disk
         let buckets = try await Bucket.query(on: req.db)
-            .filter(\.$user.$id == sessionToken.userId)
+            .filter(\.$user.$id == auth.userId)
             .all()
 
         for bucket in buckets {
@@ -218,7 +204,7 @@ struct InternalUserController: RouteCollection {
 
         // Remove from all caches
         let accessKeys = try await AccessKey.query(on: req.db)
-            .filter(\.$user.$id == sessionToken.userId)
+            .filter(\.$user.$id == auth.userId)
             .all()
 
         for accessKey in accessKeys {
@@ -227,7 +213,7 @@ struct InternalUserController: RouteCollection {
         }
 
         // Delete the user (buckets and access keys cascade delete in DB)
-        try await userToDelete.delete(on: req.db)
+        try await auth.user.delete(on: req.db)
 
         return .noContent
     }

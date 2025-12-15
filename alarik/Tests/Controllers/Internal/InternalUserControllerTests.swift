@@ -729,4 +729,114 @@ struct UserControllerTests {
             #expect(bucketsAfter.isEmpty)
         }
     }
+
+    @Test("Auth with access key - should pass")
+    func testAuthWithAccessKey() async throws {
+        try await withApp { app in
+
+            try await app.test(
+                .POST, "/api/v1/users/auth",
+                beforeRequest: { req in
+                    setAccessKeyHeaders(&req)
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .ok)
+                    let user = try res.content.decode(User.ResponseDTO.self)
+                    #expect(user.username == "alarik")
+                })
+        }
+    }
+
+    @Test("List access keys with access key auth - should pass")
+    func testListAccessKeysWithAccessKey() async throws {
+        try await withApp { app in
+
+            try await app.test(
+                .GET, "/api/v1/users/accessKeys",
+                beforeRequest: { req in
+                    setAccessKeyHeaders(&req)
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .ok)
+                    let page = try res.content.decode(Page<AccessKey.ResponseDTO>.self)
+                    #expect(page.items.count >= 1)
+                })
+        }
+    }
+
+    @Test("Edit user with access key - should pass")
+    func testEditUserWithAccessKey() async throws {
+        try await withApp { app in
+
+            let editDTO = User.Edit(
+                name: "Updated Admin Name",
+                username: "alarik",
+                currentPassword: nil,
+                newPassword: nil
+            )
+
+            try await app.test(
+                .PUT, "/api/v1/users",
+                beforeRequest: { req in
+                    setAccessKeyHeaders(&req)
+                    try req.content.encode(editDTO)
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .ok)
+                    let user = try res.content.decode(User.ResponseDTO.self)
+                    #expect(user.name == "Updated Admin Name")
+                })
+        }
+    }
+
+    @Test("Create access key with access key auth - should pass")
+    func testCreateAccessKeyWithAccessKey() async throws {
+        try await withApp { app in
+
+            let createDTO = AccessKey.Create(
+                accessKey: "NEWACCESSKEY123456", secretKey: "newsecretkey123")
+
+            try await app.test(
+                .POST, "/api/v1/users/accessKeys",
+                beforeRequest: { req in
+                    setAccessKeyHeaders(&req)
+                    try req.content.encode(createDTO)
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .ok)
+                    let key = try res.content.decode(AccessKey.ResponseDTO.self)
+                    #expect(key.accessKey == "NEWACCESSKEY123456")
+                })
+        }
+    }
+
+    @Test("Auth with invalid access key - should fail")
+    func testAuthWithInvalidAccessKey() async throws {
+        try await withApp { app in
+            try await app.test(
+                .POST, "/api/v1/users/auth",
+                beforeRequest: { req in
+                    setAccessKeyHeaders(&req, accessKey: "INVALIDKEY", secretKey: "invalidsecret")
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .unauthorized)
+                })
+        }
+    }
+
+    @Test("Auth with access key - only X-Access-Key header - should fail")
+    func testAuthWithOnlyAccessKeyHeader() async throws {
+        try await withApp { app in
+
+            try await app.test(
+                .POST, "/api/v1/users/auth",
+                beforeRequest: { req in
+                    req.headers.add(name: "X-Access-Key", value: testAccessKey)
+                    // Missing X-Secret-Key header
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .unauthorized)
+                })
+        }
+    }
 }

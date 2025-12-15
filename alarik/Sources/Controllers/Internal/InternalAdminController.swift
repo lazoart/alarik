@@ -59,19 +59,11 @@ struct InternalAdminController: RouteCollection {
 
     @Sendable
     func deleteBucket(req: Request) async throws -> HTTPStatus {
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
+        let auth = try req.auth.require(AuthenticatedUser.self)
+        try auth.requireAdmin()
 
         guard let bucketName = req.parameters.get("bucketName") else {
             throw Abort(.badRequest, reason: "Missing bucket name")
-        }
-
-        guard let fetchedAdminUser: User = try await User.find(sessionToken.userId, on: req.db)
-        else {
-            throw Abort(.unauthorized, reason: "User not found")
-        }
-
-        guard fetchedAdminUser.isAdmin else {
-            throw Abort(.unauthorized, reason: "User not admin")
         }
 
         guard
@@ -92,16 +84,8 @@ struct InternalAdminController: RouteCollection {
 
     @Sendable
     func listBuckets(req: Request) async throws -> Page<Bucket> {
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
-
-        guard let fetchedAdminUser: User = try await User.find(sessionToken.userId, on: req.db)
-        else {
-            throw Abort(.unauthorized, reason: "User not found")
-        }
-
-        guard fetchedAdminUser.isAdmin else {
-            throw Abort(.unauthorized, reason: "User not admin")
-        }
+        let auth = try req.auth.require(AuthenticatedUser.self)
+        try auth.requireAdmin()
 
         return try await Bucket.query(on: req.db)
             .sort(\.$creationDate, .descending)
@@ -111,16 +95,8 @@ struct InternalAdminController: RouteCollection {
 
     @Sendable
     func listUsers(req: Request) async throws -> Page<User.ResponseDTO> {
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
-
-        guard let fetchedAdminUser: User = try await User.find(sessionToken.userId, on: req.db)
-        else {
-            throw Abort(.unauthorized, reason: "User not found")
-        }
-
-        guard fetchedAdminUser.isAdmin else {
-            throw Abort(.unauthorized, reason: "User not admin")
-        }
+        let auth = try req.auth.require(AuthenticatedUser.self)
+        try auth.requireAdmin()
 
         let user: Page<User> = try await User.query(on: req.db)
             .sort(\.$name, .descending)
@@ -133,16 +109,8 @@ struct InternalAdminController: RouteCollection {
     func createUser(req: Request) async throws -> User.ResponseDTO {
         try User.Create.validate(content: req)
 
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
-
-        guard let fetchedAdminUser: User = try await User.find(sessionToken.userId, on: req.db)
-        else {
-            throw Abort(.unauthorized, reason: "User not found")
-        }
-
-        guard fetchedAdminUser.isAdmin else {
-            throw Abort(.unauthorized, reason: "User not admin")
-        }
+        let auth = try req.auth.require(AuthenticatedUser.self)
+        try auth.requireAdmin()
 
         let create: User.Create = try req.content.decode(User.Create.self)
         let user: User = try User(
@@ -170,16 +138,8 @@ struct InternalAdminController: RouteCollection {
     func editUser(req: Request) async throws -> User.ResponseDTO {
         try User.EditAdmin.validate(content: req)
 
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
-
-        guard let fetchedAdminUser: User = try await User.find(sessionToken.userId, on: req.db)
-        else {
-            throw Abort(.unauthorized, reason: "User not found")
-        }
-
-        guard fetchedAdminUser.isAdmin else {
-            throw Abort(.unauthorized, reason: "User not admin")
-        }
+        let auth = try req.auth.require(AuthenticatedUser.self)
+        try auth.requireAdmin()
 
         let editUser: User.EditAdmin = try req.content.decode(User.EditAdmin.self)
 
@@ -204,16 +164,8 @@ struct InternalAdminController: RouteCollection {
 
     @Sendable
     func deleteUser(req: Request) async throws -> HTTPStatus {
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
-
-        guard let fetchedAdminUser: User = try await User.find(sessionToken.userId, on: req.db)
-        else {
-            throw Abort(.unauthorized, reason: "User not found")
-        }
-
-        guard fetchedAdminUser.isAdmin else {
-            throw Abort(.unauthorized, reason: "User not admin")
-        }
+        let auth = try req.auth.require(AuthenticatedUser.self)
+        try auth.requireAdmin()
 
         guard let userIdString = req.parameters.get("userId"),
             let userId = UUID(uuidString: userIdString)
@@ -226,7 +178,7 @@ struct InternalAdminController: RouteCollection {
         }
 
         // Prevent deleting yourself
-        if userToDelete.id == fetchedAdminUser.id {
+        if userToDelete.id == auth.userId {
             throw Abort(.forbidden, reason: "Cannot delete yourself")
         }
 
@@ -258,16 +210,8 @@ struct InternalAdminController: RouteCollection {
 
     @Sendable
     func getStorageStats(req: Request) async throws -> StorageStats {
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
-
-        guard let fetchedAdminUser: User = try await User.find(sessionToken.userId, on: req.db)
-        else {
-            throw Abort(.unauthorized, reason: "User not found")
-        }
-
-        guard fetchedAdminUser.isAdmin else {
-            throw Abort(.unauthorized, reason: "User not admin")
-        }
+        let auth = try req.auth.require(AuthenticatedUser.self)
+        try auth.requireAdmin()
 
         let storageURL = URL(fileURLWithPath: BucketHandler.rootPath)
 

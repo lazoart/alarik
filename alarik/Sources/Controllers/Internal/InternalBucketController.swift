@@ -47,16 +47,16 @@ struct InternalBucketController: RouteCollection {
 
     @Sendable
     func listBuckets(req: Request) async throws -> Page<Bucket> {
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
+        let auth = try req.auth.require(AuthenticatedUser.self)
         return try await Bucket.query(on: req.db)
-            .filter(\.$user.$id == sessionToken.userId)
+            .filter(\.$user.$id == auth.userId)
             .sort(\.$creationDate, .descending)
             .paginate(for: req)
     }
 
     @Sendable
     func createBucket(req: Request) async throws -> Bucket.ResponseDTO {
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
+        let auth = try req.auth.require(AuthenticatedUser.self)
 
         try Bucket.Create.validate(content: req)
 
@@ -67,14 +67,14 @@ struct InternalBucketController: RouteCollection {
         }
 
         try await BucketService.create(
-            on: req.db, bucketName: create.name, userId: sessionToken.userId,
+            on: req.db, bucketName: create.name, userId: auth.userId,
             versioningEnabled: create.versioningEnabled)
 
         // Fetch the created bucket from the database to get the ID
         guard
             let bucket = try await Bucket.query(on: req.db)
                 .filter(\.$name == create.name)
-                .filter(\.$user.$id == sessionToken.userId)
+                .filter(\.$user.$id == auth.userId)
                 .first()
         else {
             throw Abort(.internalServerError, reason: "Failed to retrieve created bucket")
@@ -85,7 +85,7 @@ struct InternalBucketController: RouteCollection {
 
     @Sendable
     func deleteBucket(req: Request) async throws -> HTTPStatus {
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
+        let auth = try req.auth.require(AuthenticatedUser.self)
 
         guard let bucketName = req.parameters.get("bucketName") else {
             throw Abort(.badRequest, reason: "Missing bucket name")
@@ -95,20 +95,21 @@ struct InternalBucketController: RouteCollection {
         guard
             try await Bucket.query(on: req.db)
                 .filter(\.$name == bucketName)
-                .filter(\.$user.$id == sessionToken.userId)
+                .filter(\.$user.$id == auth.userId)
                 .first() != nil
         else {
             throw Abort(.notFound, reason: "Bucket not found")
         }
 
-        try await BucketService.delete(on: req.db, bucketName: bucketName, userId: sessionToken.userId, force: true)
+        try await BucketService.delete(
+            on: req.db, bucketName: bucketName, userId: auth.userId, force: true)
 
         return .noContent
     }
 
     @Sendable
     func listObjects(req: Request) async throws -> Page<ObjectMeta.ResponseDTO> {
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
+        let auth = try req.auth.require(AuthenticatedUser.self)
 
         guard let bucketName = req.query[String.self, at: "bucket"] else {
             throw Abort(.badRequest, reason: "Missing 'bucket' query parameter")
@@ -118,7 +119,7 @@ struct InternalBucketController: RouteCollection {
         guard
             try await Bucket.query(on: req.db)
                 .filter(\.$name == bucketName)
-                .filter(\.$user.$id == sessionToken.userId)
+                .filter(\.$user.$id == auth.userId)
                 .first() != nil
         else {
             throw Abort(.notFound, reason: "Bucket not found")
@@ -175,7 +176,7 @@ struct InternalBucketController: RouteCollection {
 
     @Sendable
     func uploadObject(req: Request) async throws -> ObjectMeta.ResponseDTO {
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
+        let auth = try req.auth.require(AuthenticatedUser.self)
 
         guard let bucketName = req.query[String.self, at: "bucket"] else {
             throw Abort(.badRequest, reason: "Missing 'bucket' query parameter")
@@ -187,7 +188,7 @@ struct InternalBucketController: RouteCollection {
         guard
             try await Bucket.query(on: req.db)
                 .filter(\.$name == bucketName)
-                .filter(\.$user.$id == sessionToken.userId)
+                .filter(\.$user.$id == auth.userId)
                 .first() != nil
         else {
             throw Abort(.notFound, reason: "Bucket not found")
@@ -244,7 +245,7 @@ struct InternalBucketController: RouteCollection {
 
     @Sendable
     func deleteObject(req: Request) async throws -> HTTPStatus {
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
+        let auth = try req.auth.require(AuthenticatedUser.self)
 
         guard let bucketName = req.query[String.self, at: "bucket"] else {
             throw Abort(.badRequest, reason: "Missing 'bucket' query parameter")
@@ -258,7 +259,7 @@ struct InternalBucketController: RouteCollection {
         guard
             try await Bucket.query(on: req.db)
                 .filter(\.$name == bucketName)
-                .filter(\.$user.$id == sessionToken.userId)
+                .filter(\.$user.$id == auth.userId)
                 .first() != nil
         else {
             throw Abort(.notFound, reason: "Bucket not found")
@@ -299,7 +300,7 @@ struct InternalBucketController: RouteCollection {
 
     @Sendable
     func downloadObjects(req: Request) async throws -> Response {
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
+        let auth = try req.auth.require(AuthenticatedUser.self)
         let input = try req.content.decode(DownloadRequestDTO.self)
 
         guard !input.keys.isEmpty else {
@@ -310,7 +311,7 @@ struct InternalBucketController: RouteCollection {
         guard
             try await Bucket.query(on: req.db)
                 .filter(\.$name == input.bucket)
-                .filter(\.$user.$id == sessionToken.userId)
+                .filter(\.$user.$id == auth.userId)
                 .first() != nil
         else {
             throw Abort(.notFound, reason: "Bucket not found")
@@ -511,7 +512,7 @@ struct InternalBucketController: RouteCollection {
 
     @Sendable
     func getVersioning(req: Request) async throws -> VersioningStatusDTO {
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
+        let auth = try req.auth.require(AuthenticatedUser.self)
 
         guard let bucketName = req.parameters.get("bucketName") else {
             throw Abort(.badRequest, reason: "Missing bucket name")
@@ -521,7 +522,7 @@ struct InternalBucketController: RouteCollection {
         guard
             let bucket = try await Bucket.query(on: req.db)
                 .filter(\.$name == bucketName)
-                .filter(\.$user.$id == sessionToken.userId)
+                .filter(\.$user.$id == auth.userId)
                 .first()
         else {
             throw Abort(.notFound, reason: "Bucket not found")
@@ -532,7 +533,7 @@ struct InternalBucketController: RouteCollection {
 
     @Sendable
     func setVersioning(req: Request) async throws -> VersioningStatusDTO {
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
+        let auth = try req.auth.require(AuthenticatedUser.self)
 
         guard let bucketName = req.parameters.get("bucketName") else {
             throw Abort(.badRequest, reason: "Missing bucket name")
@@ -549,7 +550,7 @@ struct InternalBucketController: RouteCollection {
         guard
             let bucket = try await Bucket.query(on: req.db)
                 .filter(\.$name == bucketName)
-                .filter(\.$user.$id == sessionToken.userId)
+                .filter(\.$user.$id == auth.userId)
                 .first()
         else {
             throw Abort(.notFound, reason: "Bucket not found")
@@ -565,7 +566,7 @@ struct InternalBucketController: RouteCollection {
 
     @Sendable
     func listObjectVersions(req: Request) async throws -> [ObjectMeta.ResponseDTO] {
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
+        let auth = try req.auth.require(AuthenticatedUser.self)
 
         guard let bucketName = req.query[String.self, at: "bucket"] else {
             throw Abort(.badRequest, reason: "Missing 'bucket' query parameter")
@@ -578,7 +579,7 @@ struct InternalBucketController: RouteCollection {
         guard
             try await Bucket.query(on: req.db)
                 .filter(\.$name == bucketName)
-                .filter(\.$user.$id == sessionToken.userId)
+                .filter(\.$user.$id == auth.userId)
                 .first() != nil
         else {
             throw Abort(.notFound, reason: "Bucket not found")
@@ -591,7 +592,7 @@ struct InternalBucketController: RouteCollection {
 
     @Sendable
     func deleteObjectVersion(req: Request) async throws -> HTTPStatus {
-        let sessionToken: SessionToken = try req.auth.require(SessionToken.self)
+        let auth = try req.auth.require(AuthenticatedUser.self)
 
         guard let bucketName = req.query[String.self, at: "bucket"] else {
             throw Abort(.badRequest, reason: "Missing 'bucket' query parameter")
@@ -608,7 +609,7 @@ struct InternalBucketController: RouteCollection {
         guard
             try await Bucket.query(on: req.db)
                 .filter(\.$name == bucketName)
-                .filter(\.$user.$id == sessionToken.userId)
+                .filter(\.$user.$id == auth.userId)
                 .first() != nil
         else {
             throw Abort(.notFound, reason: "Bucket not found")

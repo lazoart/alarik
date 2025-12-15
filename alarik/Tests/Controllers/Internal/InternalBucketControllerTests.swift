@@ -2528,4 +2528,147 @@ struct InternalBucketControllerTests {
                 })
         }
     }
+
+    @Test("List buckets with access key - should pass")
+    func testListBucketsWithAccessKey() async throws {
+        try await withApp { app in
+
+            // Create buckets for admin user via DB
+            let adminUser = try await User.query(on: app.db)
+                .filter(\.$username == "alarik")
+                .first()
+            let bucket = Bucket(name: "access-key-bucket", userId: adminUser!.id!)
+            try await bucket.save(on: app.db)
+            try BucketHandler.create(name: "access-key-bucket")
+
+            // Add access key to bucket cache
+            await AccessKeyBucketMapCache.shared.add(accessKey: testAccessKey, bucketName: "access-key-bucket")
+
+            try await app.test(
+                .GET, "/api/v1/buckets",
+                beforeRequest: { req in
+                    setAccessKeyHeaders(&req)
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .ok)
+                    let page = try res.content.decode(Page<Bucket>.self)
+                    #expect(page.items.count >= 1)
+                })
+        }
+    }
+
+    @Test("Create bucket with access key - should pass")
+    func testCreateBucketWithAccessKey() async throws {
+        try await withApp { app in
+
+            let createDTO = Bucket.Create(name: "new-access-key-bucket", versioningEnabled: false)
+
+            try await app.test(
+                .POST, "/api/v1/buckets",
+                beforeRequest: { req in
+                    setAccessKeyHeaders(&req)
+                    try req.content.encode(createDTO)
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .ok)
+                    let bucket = try res.content.decode(Bucket.ResponseDTO.self)
+                    #expect(bucket.name == "new-access-key-bucket")
+                })
+
+            // Verify bucket was created
+            let bucket = try await Bucket.query(on: app.db)
+                .filter(\.$name == "new-access-key-bucket")
+                .first()
+            #expect(bucket != nil)
+        }
+    }
+
+    @Test("Delete bucket with access key - should pass")
+    func testDeleteBucketWithAccessKey() async throws {
+        try await withApp { app in
+
+            // Create bucket for admin user
+            let adminUser = try await User.query(on: app.db)
+                .filter(\.$username == "alarik")
+                .first()
+            let bucket = Bucket(name: "delete-access-key-bucket", userId: adminUser!.id!)
+            try await bucket.save(on: app.db)
+            try BucketHandler.create(name: "delete-access-key-bucket")
+            await AccessKeyBucketMapCache.shared.add(accessKey: testAccessKey, bucketName: "delete-access-key-bucket")
+
+            try await app.test(
+                .DELETE, "/api/v1/buckets/delete-access-key-bucket",
+                beforeRequest: { req in
+                    setAccessKeyHeaders(&req)
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .noContent)
+                })
+
+            // Verify bucket was deleted
+            let deletedBucket = try await Bucket.query(on: app.db)
+                .filter(\.$name == "delete-access-key-bucket")
+                .first()
+            #expect(deletedBucket == nil)
+        }
+    }
+
+    @Test("Access another user's bucket with access key - should fail")
+    func testAccessOtherUserBucketWithAccessKey() async throws {
+        try await withApp { app in
+
+            // Create a different user with their own bucket
+            let otherUser = User(
+                name: "Other User",
+                username: "other@example.com",
+                passwordHash: try Bcrypt.hash("TestPass123!"),
+                isAdmin: false
+            )
+            try await otherUser.save(on: app.db)
+
+            let otherBucket = Bucket(name: "other-user-bucket", userId: otherUser.id!)
+            try await otherBucket.save(on: app.db)
+            try BucketHandler.create(name: "other-user-bucket")
+
+            // Try to access other user's bucket with admin access key
+            try await app.test(
+                .GET, "/api/v1/objects?bucket=other-user-bucket",
+                beforeRequest: { req in
+                    setAccessKeyHeaders(&req)
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .notFound)
+                })
+        }
+    }
+
+    @Test("List objects with access key - should pass")
+    func testListObjectsWithAccessKey() async throws {
+        try await withApp { app in
+
+            // Create bucket for admin user
+            let adminUser = try await User.query(on: app.db)
+                .filter(\.$username == "alarik")
+                .first()
+            let bucket = Bucket(name: "objects-access-key-bucket", userId: adminUser!.id!)
+            try await bucket.save(on: app.db)
+            try BucketHandler.create(name: "objects-access-key-bucket")
+            await AccessKeyBucketMapCache.shared.add(accessKey: testAccessKey, bucketName: "objects-access-key-bucket")
+
+            // Add an object
+            try await putObject(app, bucketName: "objects-access-key-bucket", key: "test.txt", content: "test content")
+
+            try await app.test(
+                .GET, "/api/v1/objects?bucket=objects-access-key-bucket",
+                beforeRequest: { req in
+                    setAccessKeyHeaders(&req)
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .ok)
+                    let page = try res.content.decode(Page<ObjectMeta.ResponseDTO>.self)
+                    #expect(page.items.count == 1)
+                    #expect(page.items.first?.key == "test.txt")
+                })
+        }
+    }
 }

@@ -14,18 +14,31 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import Fluent
 import Vapor
 
-func routes(_ app: Application) throws {
+/// Represents a user authenticated via any supported method (JWT or Access Key)
+struct AuthenticatedUser: Authenticatable {
 
-    // API - INTERNAL
-    let apiV1: any RoutesBuilder = app.grouped("api", "v1")
-    try apiV1.register(collection: InternalUserController())
-    try apiV1.grouped(InternalAuthenticator()).register(collection: InternalBaseController())
-    try apiV1.grouped(InternalAuthenticator()).register(collection: InternalAdminController())
-    try apiV1.grouped(InternalAuthenticator()).register(collection: InternalBucketController())
+    enum AuthMethod {
+        case jwt
+        case accessKey
+    }
 
-    // S3
-    try app.register(collection: S3Controller())
+    let user: User
+    let authMethod: AuthMethod
+
+    var userId: UUID {
+        user.id!
+    }
+
+    var isAdmin: Bool {
+        user.isAdmin
+    }
+
+    /// Require that the authenticated user is an admin, otherwise throw unauthorized
+    func requireAdmin() throws {
+        guard isAdmin else {
+            throw Abort(.unauthorized, reason: "User not admin")
+        }
+    }
 }

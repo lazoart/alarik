@@ -842,4 +842,145 @@ struct InternalAdminControllerTests {
             #expect(!FileManager.default.fileExists(atPath: bucketURL.path))
         }
     }
+
+    @Test("List users with access key as admin - should pass")
+    func testListUsersWithAccessKey() async throws {
+        try await withApp { app in
+
+            try await app.test(
+                .GET, "/api/v1/admin/users",
+                beforeRequest: { req in
+                    setAccessKeyHeaders(&req)
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .ok)
+                    let page = try res.content.decode(Page<User.ResponseDTO>.self)
+                    #expect(page.items.count >= 1)
+                })
+        }
+    }
+
+    @Test("List users with access key as non-admin - should fail")
+    func testListUsersWithAccessKeyAsNonAdmin() async throws {
+        try await withApp { app in
+            let nonAdminAccessKey = "NONADMINKEY12345678"
+            let nonAdminSecretKey = "nonAdminSecretKey12345"
+            _ = try await createNonAdminUserWithAccessKey(app, accessKey: nonAdminAccessKey, secretKey: nonAdminSecretKey)
+
+            try await app.test(
+                .GET, "/api/v1/admin/users",
+                beforeRequest: { req in
+                    setAccessKeyHeaders(&req, accessKey: nonAdminAccessKey, secretKey: nonAdminSecretKey)
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .unauthorized)
+                })
+        }
+    }
+
+    @Test("List users with invalid access key - should fail")
+    func testListUsersWithInvalidAccessKey() async throws {
+        try await withApp { app in
+            try await app.test(
+                .GET, "/api/v1/admin/users",
+                beforeRequest: { req in
+                    setAccessKeyHeaders(&req, accessKey: "INVALIDKEY", secretKey: "invalidsecret")
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .unauthorized)
+                })
+        }
+    }
+
+    @Test("List users with wrong secret key - should fail")
+    func testListUsersWithWrongSecretKey() async throws {
+        try await withApp { app in
+
+            try await app.test(
+                .GET, "/api/v1/admin/users",
+                beforeRequest: { req in
+                    setAccessKeyHeaders(&req, accessKey: testAccessKey, secretKey: "wrongsecretkey")
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .unauthorized)
+                })
+        }
+    }
+
+    @Test("Get storage stats with access key as admin - should pass")
+    func testGetStorageStatsWithAccessKey() async throws {
+        try await withApp { app in
+
+            try await app.test(
+                .GET, "/api/v1/admin/storageStats",
+                beforeRequest: { req in
+                    setAccessKeyHeaders(&req)
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .ok)
+                    let stats = try res.content.decode(InternalAdminController.StorageStats.self)
+                    #expect(stats.userCount >= 1)
+                })
+        }
+    }
+
+    @Test("Delete bucket with access key as admin - should pass")
+    func testDeleteBucketWithAccessKey() async throws {
+        try await withApp { app in
+
+            // Create a bucket for admin user
+            let adminUser = try await User.query(on: app.db)
+                .filter(\.$username == "alarik")
+                .first()
+            let bucket = Bucket(name: "access-key-delete-test-bucket", userId: adminUser!.id!)
+            try await bucket.save(on: app.db)
+            try BucketHandler.create(name: "access-key-delete-test-bucket")
+
+            // Delete the bucket using access key auth
+            try await app.test(
+                .DELETE, "/api/v1/admin/buckets/access-key-delete-test-bucket",
+                beforeRequest: { req in
+                    setAccessKeyHeaders(&req)
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .noContent)
+                })
+
+            // Verify bucket is deleted
+            let deletedBucket = try await Bucket.query(on: app.db)
+                .filter(\.$name == "access-key-delete-test-bucket")
+                .first()
+            #expect(deletedBucket == nil)
+        }
+    }
+
+    @Test("Access key with expired date - should fail")
+    func testExpiredAccessKey() async throws {
+        try await withApp { app in
+            let adminUser = try await User.query(on: app.db)
+                .filter(\.$username == "alarik")
+                .first()
+
+            // Create an expired access key
+            let expiredAccessKey = AccessKey(
+                userId: adminUser!.id!,
+                accessKey: "EXPIREDKEY12345678",
+                secretKey: "expiredSecretKey123",
+                expirationDate: Date().addingTimeInterval(-3600)  // Expired 1 hour ago
+            )
+            try await expiredAccessKey.save(on: app.db)
+
+            await AccessKeySecretKeyMapCache.shared.add(accessKey: "EXPIREDKEY12345678", secretKey: "expiredSecretKey123")
+            await AccessKeyUserMapCache.shared.add(accessKey: "EXPIREDKEY12345678", userId: adminUser!.id!)
+
+            try await app.test(
+                .GET, "/api/v1/admin/users",
+                beforeRequest: { req in
+                    setAccessKeyHeaders(&req, accessKey: "EXPIREDKEY12345678", secretKey: "expiredSecretKey123")
+                },
+                afterResponse: { res async throws in
+                    #expect(res.status == .unauthorized)
+                })
+        }
+    }
 }
