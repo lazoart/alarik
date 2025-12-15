@@ -101,6 +101,12 @@ const items = computed<NavigationMenuItem[][]>(() => {
 const userMenuItems = computed<DropdownMenuItem[][]>(() => [
     [
         {
+            label: "Documentation",
+            icon: "i-lucide-badge-question-mark",
+            to: "https://alarik.io/docs",
+            target: "_blank",
+        },
+        {
             label: "Appearance",
             icon: "i-lucide-sun-moon",
             children: [
