@@ -38,6 +38,12 @@ public func configure(_ app: Application) async throws {
             atPath: "Storage/buckets",
             withIntermediateDirectories: true
         )
+
+        try FileManager.default.createDirectory(
+            atPath: "Storage/multipart",
+            withIntermediateDirectories: true
+        )
+
         app.databases.use(
             DatabaseConfigurationFactory.sqlite(.file("Storage/db.sqlite")), as: .sqlite)
     #endif

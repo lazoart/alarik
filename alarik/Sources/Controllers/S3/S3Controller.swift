@@ -31,10 +31,10 @@ struct S3Controller: RouteCollection {
         bucketRoute.on(.HEAD, use: self.handleBucketHead)
         bucketRoute.get(use: self.handleBucketGet)
 
-        // Object Operations
         bucketRoute.on(.HEAD, "**", use: self.handleObjectHead)
         bucketRoute.get("**", use: self.handleObjectGet)
         bucketRoute.put("**", use: self.handleObjectPut)
+        bucketRoute.post("**", use: self.handleObjectPost)
         bucketRoute.delete("**", use: self.handleObjectDelete)
     }
 
@@ -52,6 +52,11 @@ struct S3Controller: RouteCollection {
 
         let query = req.url.query ?? ""
         let lowerQuery = query.lowercased()
+
+        // Handle ?uploads - list multipart uploads
+        if lowerQuery.contains("uploads") && !lowerQuery.contains("uploadid") {
+            return try handleListMultipartUploads(req: req, bucketName: bucketName)
+        }
 
         // Handle ?versions - list object versions
         // Use word boundary check: "versions" but not "versioning"
@@ -328,6 +333,20 @@ struct S3Controller: RouteCollection {
 
         _ = try await S3Service.authenticateWithCache(req: req, bucketName: bucketName)
 
+        // Check if this is an UploadPart request (PUT with partNumber & uploadId)
+        if let partNumberStr = req.query[String.self, at: "partNumber"],
+            let partNumber = Int(partNumberStr),
+            let uploadId = req.query[String.self, at: "uploadId"]
+        {
+            return try await handleUploadPart(
+                req: req,
+                bucketName: bucketName,
+                key: keyPath,
+                uploadId: uploadId,
+                partNumber: partNumber
+            )
+        }
+
         let versioningStatus = await BucketVersioningCache.shared.getStatus(for: bucketName)
 
         // Check if this is a copy operation
@@ -343,11 +362,8 @@ struct S3Controller: RouteCollection {
 
         let maxBodySize = req.application.routes.defaultMaxBodySize.value
         let bodyBuffer = try await req.body.collect(max: maxBodySize).get()
-        guard var buffer = bodyBuffer else {
-            throw S3Error(
-                status: .badRequest, code: "MissingRequestBodyError",
-                message: "Request body is empty.", requestId: req.id)
-        }
+        // S3 allows zero-byte objects, so we use an empty buffer if body is nil
+        var buffer = bodyBuffer ?? ByteBuffer()
 
         let isChunked =
             req.headers.first(name: "Content-Encoding")?.contains("aws-chunked") ?? false
@@ -507,6 +523,16 @@ struct S3Controller: RouteCollection {
         try await S3Service.verifyBucketExists(bucketName, requestId: req.id)
         _ = try await S3Service.authenticateWithCache(req: req, bucketName: bucketName)
 
+        // Check if this is ListParts (GET with uploadId)
+        if let uploadId = req.query[String.self, at: "uploadId"] {
+            return try handleListParts(
+                req: req,
+                bucketName: bucketName,
+                key: keyPath,
+                uploadId: uploadId
+            )
+        }
+
         // Check for versionId query parameter
         let versionId = req.query[String.self, at: "versionId"]
 
@@ -655,6 +681,18 @@ struct S3Controller: RouteCollection {
 
         _ = try await S3Service.authenticateWithCache(req: req, bucketName: bucketName)
 
+        // Check if this is AbortMultipartUpload (DELETE with uploadId, no versionId)
+        if let uploadId = req.query[String.self, at: "uploadId"],
+            req.query[String.self, at: "versionId"] == nil
+        {
+            return try handleAbortMultipartUpload(
+                req: req,
+                bucketName: bucketName,
+                key: keyPath,
+                uploadId: uploadId
+            )
+        }
+
         // Check for versionId query parameter
         let versionId = req.query[String.self, at: "versionId"]
 
@@ -701,5 +739,371 @@ struct S3Controller: RouteCollection {
         }
 
         return Response(status: .noContent, headers: headers)
+    }
+
+    /// Handles POST /:bucketName/*key
+    /// - ?uploads → CreateMultipartUpload
+    /// - ?uploadId=X → CompleteMultipartUpload
+    @Sendable
+    func handleObjectPost(req: Request) async throws -> Response {
+        let bucketName = try S3Service.extractBucketName(from: req)
+        let keyPath = S3Service.extractObjectKey(from: req)
+        let query = req.url.query ?? ""
+
+        try await S3Service.verifyBucketExists(bucketName, requestId: req.id)
+        _ = try await S3Service.authenticateWithCache(req: req, bucketName: bucketName)
+
+        // POST ?uploads → CreateMultipartUpload
+        if query.lowercased().contains("uploads") && !query.contains("uploadId") {
+            return try handleCreateMultipartUpload(req: req, bucketName: bucketName, key: keyPath)
+        }
+
+        // POST ?uploadId=X → CompleteMultipartUpload
+        if let uploadId = req.query[String.self, at: "uploadId"] {
+            return try await handleCompleteMultipartUpload(
+                req: req, bucketName: bucketName, key: keyPath, uploadId: uploadId)
+        }
+
+        throw S3Error(
+            status: .badRequest, code: "InvalidRequest",
+            message: "Invalid POST request", requestId: req.id)
+    }
+
+    /// CreateMultipartUpload - POST /:bucket/:key?uploads
+    @Sendable
+    private func handleCreateMultipartUpload(
+        req: Request,
+        bucketName: String,
+        key: String
+    ) throws -> Response {
+        guard !key.isEmpty else {
+            throw S3Error(
+                status: .badRequest, code: "InvalidArgument",
+                message: "Invalid argument", requestId: req.id)
+        }
+
+        let contentType = req.headers.contentType?.description ?? "application/octet-stream"
+
+        // Extract custom metadata headers
+        var metadata: [String: String] = [:]
+        for (name, value) in req.headers {
+            if name.lowercased().hasPrefix("x-amz-meta-") {
+                let metaKey = String(name.dropFirst("x-amz-meta-".count)).lowercased()
+                metadata[metaKey] = value
+            }
+        }
+
+        let uploadId = try MultipartFileHandler.createUpload(
+            bucketName: bucketName,
+            key: key,
+            contentType: contentType,
+            metadata: metadata
+        )
+
+        let xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <InitiateMultipartUploadResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                <Bucket>\(bucketName)</Bucket>
+                <Key>\(key.xmlEscaped)</Key>
+                <UploadId>\(uploadId)</UploadId>
+            </InitiateMultipartUploadResult>
+            """
+
+        return S3Service.buildXMLResponse(data: Data(xml.utf8))
+    }
+
+    /// CompleteMultipartUpload - POST /:bucket/:key?uploadId=X
+    @Sendable
+    private func handleCompleteMultipartUpload(
+        req: Request,
+        bucketName: String,
+        key: String,
+        uploadId: String
+    ) async throws -> Response {
+        // Verify upload exists
+        guard MultipartFileHandler.uploadExists(bucketName: bucketName, uploadId: uploadId) else {
+            throw S3Error(
+                status: .notFound, code: "NoSuchUpload",
+                message: "The specified upload does not exist.", requestId: req.id)
+        }
+
+        // Parse the CompleteMultipartUpload XML body
+        let bodyData = try await req.body.collect().get() ?? ByteBuffer()
+        let bodyString = String(buffer: bodyData)
+
+        let parts = try parseCompleteMultipartUploadBody(bodyString, requestId: req.id)
+
+        // Get versioning status
+        let versioningStatus = await BucketVersioningCache.shared.getStatus(for: bucketName)
+
+        // Complete the upload
+        let etag: String
+        let versionId: String?
+        do {
+            let result = try MultipartFileHandler.completeUpload(
+                bucketName: bucketName,
+                uploadId: uploadId,
+                parts: parts,
+                versioningStatus: versioningStatus
+            )
+            etag = result.etag
+            versionId = result.versionId
+        } catch let error as NSError {
+            // Convert NSError to S3Error
+            let code = error.domain == "InvalidPartOrder" ? "InvalidPartOrder" : "InvalidPart"
+            throw S3Error(
+                status: .badRequest, code: code,
+                message: error.localizedDescription, requestId: req.id)
+        }
+
+        // Build response headers
+        var headers = HTTPHeaders()
+        headers.add(name: .contentType, value: "application/xml")
+        if let versionId = versionId {
+            headers.add(name: "x-amz-version-id", value: versionId)
+        }
+
+        // Build XML response
+        let location = "/\(bucketName)/\(key)"
+        let xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <CompleteMultipartUploadResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                <Location>\(location)</Location>
+                <Bucket>\(bucketName)</Bucket>
+                <Key>\(key.xmlEscaped)</Key>
+                <ETag>"\(etag)"</ETag>
+            </CompleteMultipartUploadResult>
+            """
+
+        return Response(status: .ok, headers: headers, body: .init(string: xml))
+    }
+
+    /// Parses the CompleteMultipartUpload XML body
+    private func parseCompleteMultipartUploadBody(
+        _ body: String,
+        requestId: String
+    ) throws -> [(partNumber: Int, etag: String)] {
+        var parts: [(partNumber: Int, etag: String)] = []
+
+        // Match each <Part>...</Part> block first
+        let partBlockPattern = #"<Part>(.*?)</Part>"#
+        let partBlockRegex = try NSRegularExpression(
+            pattern: partBlockPattern, options: [.dotMatchesLineSeparators])
+        let range = NSRange(body.startIndex..., in: body)
+
+        let partBlocks = partBlockRegex.matches(in: body, options: [], range: range)
+
+        // Patterns to extract PartNumber and ETag from within a Part block
+        let partNumberPattern = #"<PartNumber>\s*(\d+)\s*</PartNumber>"#
+        let etagPattern = #"<ETag>\s*"?([^<"]+)"?\s*</ETag>"#
+
+        let partNumberRegex = try NSRegularExpression(pattern: partNumberPattern, options: [])
+        let etagRegex = try NSRegularExpression(pattern: etagPattern, options: [])
+
+        for partBlock in partBlocks {
+            guard let blockRange = Range(partBlock.range(at: 1), in: body) else {
+                continue
+            }
+            let blockContent = String(body[blockRange])
+            let blockNSRange = NSRange(blockContent.startIndex..., in: blockContent)
+
+            // Extract PartNumber
+            guard
+                let partNumberMatch = partNumberRegex.firstMatch(
+                    in: blockContent, options: [], range: blockNSRange),
+                let partNumRange = Range(partNumberMatch.range(at: 1), in: blockContent),
+                let partNumber = Int(blockContent[partNumRange])
+            else {
+                continue
+            }
+
+            guard
+                let etagMatch = etagRegex.firstMatch(
+                    in: blockContent, options: [], range: blockNSRange),
+                let etagRange = Range(etagMatch.range(at: 1), in: blockContent)
+            else {
+                continue
+            }
+
+            let etag = String(blockContent[etagRange]).replacingOccurrences(of: "\"", with: "")
+            parts.append((partNumber: partNumber, etag: etag))
+        }
+
+        if parts.isEmpty {
+            throw S3Error(
+                status: .badRequest, code: "MalformedXML",
+                message: "The XML you provided was not well-formed.", requestId: requestId)
+        }
+
+        return parts
+    }
+
+    /// UploadPart - handled in handleObjectPut when partNumber & uploadId are present
+    @Sendable
+    private func handleUploadPart(
+        req: Request,
+        bucketName: String,
+        key: String,
+        uploadId: String,
+        partNumber: Int
+    ) async throws -> Response {
+        // Verify upload exists
+        guard MultipartFileHandler.uploadExists(bucketName: bucketName, uploadId: uploadId) else {
+            throw S3Error(
+                status: .notFound, code: "NoSuchUpload",
+                message: "The specified upload does not exist.", requestId: req.id)
+        }
+
+        // Validate part number
+        guard partNumber >= 1 && partNumber <= 10000 else {
+            throw S3Error(
+                status: .badRequest, code: "InvalidArgument",
+                message: "Part number must be between 1 and 10000.", requestId: req.id)
+        }
+
+        // Read part data
+        let maxBodySize = req.application.routes.defaultMaxBodySize.value
+        let bodyBuffer = try await req.body.collect(max: maxBodySize).get()
+        guard let buffer = bodyBuffer, buffer.readableBytes > 0 else {
+            throw S3Error(
+                status: .badRequest, code: "MissingRequestBodyError",
+                message: "Request body is empty.", requestId: req.id)
+        }
+
+        let partData = Data(buffer.readableBytesView)
+
+        // Validate Content-MD5 if provided
+        try S3Service.validateContentMD5(req: req, data: partData)
+
+        // Write the part
+        let etag = try MultipartFileHandler.writePart(
+            bucketName: bucketName,
+            uploadId: uploadId,
+            partNumber: partNumber,
+            data: partData
+        )
+
+        var headers = HTTPHeaders()
+        headers.add(name: "ETag", value: "\"\(etag)\"")
+
+        return Response(status: .ok, headers: headers)
+    }
+
+    /// AbortMultipartUpload - DELETE /:bucket/:key?uploadId=X
+    @Sendable
+    private func handleAbortMultipartUpload(
+        req: Request,
+        bucketName: String,
+        key: String,
+        uploadId: String
+    ) throws -> Response {
+        // Verify upload exists
+        guard MultipartFileHandler.uploadExists(bucketName: bucketName, uploadId: uploadId) else {
+            throw S3Error(
+                status: .notFound, code: "NoSuchUpload",
+                message: "The specified upload does not exist.", requestId: req.id)
+        }
+
+        try MultipartFileHandler.abortUpload(bucketName: bucketName, uploadId: uploadId)
+
+        return Response(status: .noContent)
+    }
+
+    /// ListParts - GET /:bucket/:key?uploadId=X
+    @Sendable
+    private func handleListParts(
+        req: Request,
+        bucketName: String,
+        key: String,
+        uploadId: String
+    ) throws -> Response {
+        // Verify upload exists and get metadata
+        let _ = try MultipartFileHandler.getUploadMeta(
+            bucketName: bucketName, uploadId: uploadId)
+
+        let maxParts = req.query[Int.self, at: "max-parts"] ?? 1000
+        let partNumberMarker = req.query[Int.self, at: "part-number-marker"] ?? 0
+
+        let (parts, isTruncated, nextPartNumberMarker) = try MultipartFileHandler.listParts(
+            bucketName: bucketName,
+            uploadId: uploadId,
+            maxParts: maxParts,
+            partNumberMarker: partNumberMarker
+        )
+
+        // Build XML response
+        var partsXml = ""
+        for part in parts {
+            partsXml += """
+                    <Part>
+                        <PartNumber>\(part.partNumber)</PartNumber>
+                        <LastModified>\(part.lastModified.iso8601String)</LastModified>
+                        <ETag>"\(part.etag)"</ETag>
+                        <Size>\(part.size)</Size>
+                    </Part>
+                """
+        }
+
+        let xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <ListPartsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                <Bucket>\(bucketName)</Bucket>
+                <Key>\(key.xmlEscaped)</Key>
+                <UploadId>\(uploadId)</UploadId>
+                <PartNumberMarker>\(partNumberMarker)</PartNumberMarker>
+                <NextPartNumberMarker>\(nextPartNumberMarker ?? 0)</NextPartNumberMarker>
+                <MaxParts>\(maxParts)</MaxParts>
+                <IsTruncated>\(isTruncated)</IsTruncated>
+            \(partsXml)
+            </ListPartsResult>
+            """
+
+        return S3Service.buildXMLResponse(data: Data(xml.utf8))
+    }
+
+    /// ListMultipartUploads - GET /:bucket?uploads
+    @Sendable
+    private func handleListMultipartUploads(req: Request, bucketName: String) throws -> Response {
+        let prefix = req.query[String.self, at: "prefix"] ?? ""
+        let keyMarker = req.query[String.self, at: "key-marker"]
+        let uploadIdMarker = req.query[String.self, at: "upload-id-marker"]
+        let maxUploads = req.query[Int.self, at: "max-uploads"] ?? 1000
+
+        let (uploads, isTruncated, nextKeyMarker, nextUploadIdMarker) =
+            try MultipartFileHandler.listUploads(
+                bucketName: bucketName,
+                prefix: prefix,
+                keyMarker: keyMarker,
+                uploadIdMarker: uploadIdMarker,
+                maxUploads: maxUploads
+            )
+
+        var uploadsXml = ""
+        for upload in uploads {
+            uploadsXml += """
+                    <Upload>
+                        <Key>\(upload.key.xmlEscaped)</Key>
+                        <UploadId>\(upload.uploadId)</UploadId>
+                        <Initiated>\(upload.initiated.iso8601String)</Initiated>
+                    </Upload>
+                """
+        }
+
+        let xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <ListMultipartUploadsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                <Bucket>\(bucketName)</Bucket>
+                <KeyMarker>\(keyMarker ?? "")</KeyMarker>
+                <UploadIdMarker>\(uploadIdMarker ?? "")</UploadIdMarker>
+                <NextKeyMarker>\(nextKeyMarker ?? "")</NextKeyMarker>
+                <NextUploadIdMarker>\(nextUploadIdMarker ?? "")</NextUploadIdMarker>
+                <MaxUploads>\(maxUploads)</MaxUploads>
+                <IsTruncated>\(isTruncated)</IsTruncated>
+                <Prefix>\(prefix)</Prefix>
+            \(uploadsXml)
+            </ListMultipartUploadsResult>
+            """
+
+        return S3Service.buildXMLResponse(data: Data(xml.utf8))
     }
 }

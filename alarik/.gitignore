@@ -13,3 +13,6 @@ default.profraw
 
 Storage/buckets/*
 !Storage/buckets/.gitkeep
+
+Storage/multipart/*
+!Storage/multipart/.gitkeep

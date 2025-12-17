@@ -82,4 +82,15 @@ extension String {
 
         return date
     }
+
+    /// Escapes special XML characters for safe inclusion in XML content
+    var xmlEscaped: String {
+        var result = self
+        result = result.replacingOccurrences(of: "&", with: "&amp;")
+        result = result.replacingOccurrences(of: "<", with: "&lt;")
+        result = result.replacingOccurrences(of: ">", with: "&gt;")
+        result = result.replacingOccurrences(of: "\"", with: "&quot;")
+        result = result.replacingOccurrences(of: "'", with: "&apos;")
+        return result
+    }
 }

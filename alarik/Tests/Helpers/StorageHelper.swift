@@ -22,7 +22,25 @@ import VaporTesting
 struct StorageHelper {
     public static func cleanStorage() throws {
         try cleanBucketsFolder()
+        try cleanMultipartFolder()
         try cleanDatabase()
+    }
+
+    private static func cleanMultipartFolder() throws {
+        let fm = FileManager.default
+        let multipartURL = URL(filePath: "Storage/multipart/")
+
+        guard fm.fileExists(atPath: multipartURL.path) else { return }
+
+        let contents = try fm.contentsOfDirectory(
+            at: multipartURL, includingPropertiesForKeys: nil, options: [])
+
+        for item in contents {
+            if item.lastPathComponent == ".gitkeep" {
+                continue
+            }
+            try fm.removeItem(at: item)
+        }
     }
 
     private static func cleanBucketsFolder() throws {

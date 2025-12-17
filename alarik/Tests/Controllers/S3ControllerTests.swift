@@ -810,7 +810,8 @@ struct S3ControllerTests {
             try await createBucket(app, bucketName: bucketName)
 
             // First upload to get the ETag
-            let putSigned = signedHeaders(for: .PUT, path: "/\(bucketName)/test.txt", body: Data(content.utf8))
+            let putSigned = signedHeaders(
+                for: .PUT, path: "/\(bucketName)/test.txt", body: Data(content.utf8))
             var etag: String = ""
             try await app.test(
                 .PUT, "/\(bucketName)/test.txt",
@@ -896,7 +897,8 @@ struct S3ControllerTests {
             try await createBucket(app, bucketName: bucketName)
 
             // First upload to get the ETag
-            let putSigned = signedHeaders(for: .PUT, path: "/\(bucketName)/test.txt", body: Data(content.utf8))
+            let putSigned = signedHeaders(
+                for: .PUT, path: "/\(bucketName)/test.txt", body: Data(content.utf8))
             var etag: String = ""
             try await app.test(
                 .PUT, "/\(bucketName)/test.txt",
@@ -932,7 +934,8 @@ struct S3ControllerTests {
             try await createBucket(app, bucketName: bucketName)
 
             // First upload to get the ETag
-            let putSigned = signedHeaders(for: .PUT, path: "/\(bucketName)/test.txt", body: Data(content.utf8))
+            let putSigned = signedHeaders(
+                for: .PUT, path: "/\(bucketName)/test.txt", body: Data(content.utf8))
             var etag: String = ""
             try await app.test(
                 .PUT, "/\(bucketName)/test.txt",
@@ -1184,7 +1187,7 @@ struct S3ControllerTests {
                 additionalHeaders: [
                     "x-amz-copy-source": "/\(bucketName)/\(sourceKey)",
                     "x-amz-metadata-directive": "REPLACE",
-                    "content-type": "application/json"
+                    "content-type": "application/json",
                 ]
             )
 
@@ -1219,7 +1222,8 @@ struct S3ControllerTests {
             try await createBucket(app, bucketName: bucketName)
 
             // Upload source
-            let putSigned = signedHeaders(for: .PUT, path: "/\(bucketName)/source.txt", body: Data(content.utf8))
+            let putSigned = signedHeaders(
+                for: .PUT, path: "/\(bucketName)/source.txt", body: Data(content.utf8))
             var etag: String = ""
             try await app.test(
                 .PUT, "/\(bucketName)/source.txt",
@@ -1237,7 +1241,7 @@ struct S3ControllerTests {
                 path: "/\(bucketName)/dest.txt",
                 additionalHeaders: [
                     "x-amz-copy-source": "/\(bucketName)/source.txt",
-                    "x-amz-copy-source-if-match": etag
+                    "x-amz-copy-source-if-match": etag,
                 ]
             )
 
@@ -1266,7 +1270,7 @@ struct S3ControllerTests {
                 path: "/\(bucketName)/dest.txt",
                 additionalHeaders: [
                     "x-amz-copy-source": "/\(bucketName)/source.txt",
-                    "x-amz-copy-source-if-match": "\"wrongetag\""
+                    "x-amz-copy-source-if-match": "\"wrongetag\"",
                 ]
             )
 
@@ -1366,6 +1370,599 @@ struct S3ControllerTests {
                 },
                 afterResponse: { res in
                     #expect(res.status == .notFound)
+                })
+        }
+    }
+
+    @Test("CreateMultipartUpload - POST /:bucket/:key?uploads")
+    func testCreateMultipartUpload() async throws {
+        let bucketName = "test-multipart-create"
+        try await withApp { app in
+            try await createBucket(app, bucketName: bucketName)
+
+            let signed = signedHeaders(
+                for: .POST,
+                path: "/\(bucketName)/test-file.txt",
+                query: "uploads"
+            )
+
+            try await app.test(
+                .POST, "/\(bucketName)/test-file.txt?uploads",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: signed)
+                },
+                afterResponse: { res in
+                    #expect(res.status == .ok)
+                    #expect(res.headers.contentType == .xml)
+
+                    let bodyString = res.body.string
+                    #expect(bodyString.contains("<InitiateMultipartUploadResult"))
+                    #expect(bodyString.contains("<Bucket>\(bucketName)</Bucket>"))
+                    #expect(bodyString.contains("<Key>test-file.txt</Key>"))
+                    #expect(bodyString.contains("<UploadId>"))
+                })
+        }
+    }
+
+    @Test("UploadPart - PUT /:bucket/:key?partNumber=X&uploadId=Y")
+    func testUploadPart() async throws {
+        let bucketName = "test-multipart-upload-part"
+        try await withApp { app in
+            try await createBucket(app, bucketName: bucketName)
+
+            // First create the multipart upload
+            let createSigned = signedHeaders(
+                for: .POST,
+                path: "/\(bucketName)/test-file.txt",
+                query: "uploads"
+            )
+
+            var uploadId: String = ""
+            try await app.test(
+                .POST, "/\(bucketName)/test-file.txt?uploads",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: createSigned)
+                },
+                afterResponse: { res in
+                    #expect(res.status == .ok)
+                    // Extract uploadId from XML response
+                    let bodyString = res.body.string
+                    if let range = bodyString.range(of: "<UploadId>"),
+                        let endRange = bodyString[range.upperBound...].range(of: "</UploadId>")
+                    {
+                        uploadId = String(bodyString[range.upperBound..<endRange.lowerBound])
+                    }
+                })
+
+            #expect(!uploadId.isEmpty)
+
+            // Upload part 1
+            let partData = Data("Hello, World!".utf8)
+            let partSigned = signedHeaders(
+                for: .PUT,
+                path: "/\(bucketName)/test-file.txt",
+                query: "partNumber=1&uploadId=\(uploadId)",
+                body: partData
+            )
+
+            try await app.test(
+                .PUT, "/\(bucketName)/test-file.txt?partNumber=1&uploadId=\(uploadId)",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: partSigned)
+                    req.body = ByteBuffer(data: partData)
+                },
+                afterResponse: { res in
+                    #expect(res.status == .ok)
+                    #expect(res.headers.first(name: "ETag") != nil)
+                })
+        }
+    }
+
+    @Test("CompleteMultipartUpload - POST /:bucket/:key?uploadId=Y")
+    func testCompleteMultipartUpload() async throws {
+        let bucketName = "test-multipart-complete"
+        try await withApp { app in
+            try await createBucket(app, bucketName: bucketName)
+
+            // Create multipart upload
+            let createSigned = signedHeaders(
+                for: .POST,
+                path: "/\(bucketName)/complete-test.txt",
+                query: "uploads"
+            )
+
+            var uploadId: String = ""
+            try await app.test(
+                .POST, "/\(bucketName)/complete-test.txt?uploads",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: createSigned)
+                },
+                afterResponse: { res in
+                    let bodyString = res.body.string
+                    if let range = bodyString.range(of: "<UploadId>"),
+                        let endRange = bodyString[range.upperBound...].range(of: "</UploadId>")
+                    {
+                        uploadId = String(bodyString[range.upperBound..<endRange.lowerBound])
+                    }
+                })
+
+            // Upload two parts
+            let part1Data = Data("Hello, ".utf8)
+            let part2Data = Data("World!".utf8)
+
+            var etag1: String = ""
+            var etag2: String = ""
+
+            let part1Signed = signedHeaders(
+                for: .PUT,
+                path: "/\(bucketName)/complete-test.txt",
+                query: "partNumber=1&uploadId=\(uploadId)",
+                body: part1Data
+            )
+            try await app.test(
+                .PUT, "/\(bucketName)/complete-test.txt?partNumber=1&uploadId=\(uploadId)",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: part1Signed)
+                    req.body = ByteBuffer(data: part1Data)
+                },
+                afterResponse: { res in
+                    etag1 = res.headers.first(name: "ETag") ?? ""
+                })
+
+            let part2Signed = signedHeaders(
+                for: .PUT,
+                path: "/\(bucketName)/complete-test.txt",
+                query: "partNumber=2&uploadId=\(uploadId)",
+                body: part2Data
+            )
+            try await app.test(
+                .PUT, "/\(bucketName)/complete-test.txt?partNumber=2&uploadId=\(uploadId)",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: part2Signed)
+                    req.body = ByteBuffer(data: part2Data)
+                },
+                afterResponse: { res in
+                    etag2 = res.headers.first(name: "ETag") ?? ""
+                })
+
+            // Complete the upload
+            let completeBody = """
+                <CompleteMultipartUpload>
+                    <Part><PartNumber>1</PartNumber><ETag>\(etag1)</ETag></Part>
+                    <Part><PartNumber>2</PartNumber><ETag>\(etag2)</ETag></Part>
+                </CompleteMultipartUpload>
+                """
+            let completeData = Data(completeBody.utf8)
+
+            let completeSigned = signedHeaders(
+                for: .POST,
+                path: "/\(bucketName)/complete-test.txt",
+                query: "uploadId=\(uploadId)",
+                body: completeData
+            )
+
+            try await app.test(
+                .POST, "/\(bucketName)/complete-test.txt?uploadId=\(uploadId)",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: completeSigned)
+                    req.body = ByteBuffer(data: completeData)
+                },
+                afterResponse: { res in
+                    #expect(res.status == .ok)
+                    let bodyString = res.body.string
+                    #expect(bodyString.contains("<CompleteMultipartUploadResult"))
+                    #expect(bodyString.contains("<Bucket>\(bucketName)</Bucket>"))
+                    #expect(bodyString.contains("<Key>complete-test.txt</Key>"))
+                    #expect(bodyString.contains("<ETag>"))
+                })
+
+            // Verify the object exists and has correct content
+            let getSigned = signedHeaders(for: .GET, path: "/\(bucketName)/complete-test.txt")
+            try await app.test(
+                .GET, "/\(bucketName)/complete-test.txt",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: getSigned)
+                },
+                afterResponse: { res in
+                    #expect(res.status == .ok)
+                    #expect(res.body.string == "Hello, World!")
+                })
+        }
+    }
+
+    @Test("AbortMultipartUpload - DELETE /:bucket/:key?uploadId=Y")
+    func testAbortMultipartUpload() async throws {
+        let bucketName = "test-multipart-abort"
+        try await withApp { app in
+            try await createBucket(app, bucketName: bucketName)
+
+            // Create multipart upload
+            let createSigned = signedHeaders(
+                for: .POST,
+                path: "/\(bucketName)/abort-test.txt",
+                query: "uploads"
+            )
+
+            var uploadId: String = ""
+            try await app.test(
+                .POST, "/\(bucketName)/abort-test.txt?uploads",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: createSigned)
+                },
+                afterResponse: { res in
+                    let bodyString = res.body.string
+                    if let range = bodyString.range(of: "<UploadId>"),
+                        let endRange = bodyString[range.upperBound...].range(of: "</UploadId>")
+                    {
+                        uploadId = String(bodyString[range.upperBound..<endRange.lowerBound])
+                    }
+                })
+
+            // Upload a part
+            let partData = Data("test data".utf8)
+            let partSigned = signedHeaders(
+                for: .PUT,
+                path: "/\(bucketName)/abort-test.txt",
+                query: "partNumber=1&uploadId=\(uploadId)",
+                body: partData
+            )
+            try await app.test(
+                .PUT, "/\(bucketName)/abort-test.txt?partNumber=1&uploadId=\(uploadId)",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: partSigned)
+                    req.body = ByteBuffer(data: partData)
+                },
+                afterResponse: { res in
+                    #expect(res.status == .ok)
+                })
+
+            // Abort the upload
+            let abortSigned = signedHeaders(
+                for: .DELETE,
+                path: "/\(bucketName)/abort-test.txt",
+                query: "uploadId=\(uploadId)"
+            )
+
+            try await app.test(
+                .DELETE, "/\(bucketName)/abort-test.txt?uploadId=\(uploadId)",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: abortSigned)
+                },
+                afterResponse: { res in
+                    #expect(res.status == .noContent)
+                })
+
+            // Trying to abort again should fail
+            try await app.test(
+                .DELETE, "/\(bucketName)/abort-test.txt?uploadId=\(uploadId)",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: abortSigned)
+                },
+                afterResponse: { res in
+                    #expect(res.status == .notFound)
+                })
+        }
+    }
+
+    @Test("ListParts - GET /:bucket/:key?uploadId=Y")
+    func testListParts() async throws {
+        let bucketName = "test-multipart-list-parts"
+        try await withApp { app in
+            try await createBucket(app, bucketName: bucketName)
+
+            // Create multipart upload
+            let createSigned = signedHeaders(
+                for: .POST,
+                path: "/\(bucketName)/list-parts-test.txt",
+                query: "uploads"
+            )
+
+            var uploadId: String = ""
+            try await app.test(
+                .POST, "/\(bucketName)/list-parts-test.txt?uploads",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: createSigned)
+                },
+                afterResponse: { res in
+                    let bodyString = res.body.string
+                    if let range = bodyString.range(of: "<UploadId>"),
+                        let endRange = bodyString[range.upperBound...].range(of: "</UploadId>")
+                    {
+                        uploadId = String(bodyString[range.upperBound..<endRange.lowerBound])
+                    }
+                })
+
+            // Upload 3 parts
+            for i in 1...3 {
+                let partData = Data("part \(i) data".utf8)
+                let partSigned = signedHeaders(
+                    for: .PUT,
+                    path: "/\(bucketName)/list-parts-test.txt",
+                    query: "partNumber=\(i)&uploadId=\(uploadId)",
+                    body: partData
+                )
+                try await app.test(
+                    .PUT, "/\(bucketName)/list-parts-test.txt?partNumber=\(i)&uploadId=\(uploadId)",
+                    beforeRequest: { req in
+                        req.headers.add(contentsOf: partSigned)
+                        req.body = ByteBuffer(data: partData)
+                    },
+                    afterResponse: { res in
+                        #expect(res.status == .ok)
+                    })
+            }
+
+            // List parts
+            let listSigned = signedHeaders(
+                for: .GET,
+                path: "/\(bucketName)/list-parts-test.txt",
+                query: "uploadId=\(uploadId)"
+            )
+
+            try await app.test(
+                .GET, "/\(bucketName)/list-parts-test.txt?uploadId=\(uploadId)",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: listSigned)
+                },
+                afterResponse: { res in
+                    #expect(res.status == .ok)
+                    let bodyString = res.body.string
+                    #expect(bodyString.contains("<ListPartsResult"))
+                    #expect(bodyString.contains("<Bucket>\(bucketName)</Bucket>"))
+                    #expect(bodyString.contains("<UploadId>\(uploadId)</UploadId>"))
+                    #expect(bodyString.contains("<PartNumber>1</PartNumber>"))
+                    #expect(bodyString.contains("<PartNumber>2</PartNumber>"))
+                    #expect(bodyString.contains("<PartNumber>3</PartNumber>"))
+                })
+        }
+    }
+
+    @Test("ListMultipartUploads - GET /:bucket?uploads")
+    func testListMultipartUploads() async throws {
+        let bucketName = "test-multipart-list-uploads"
+        try await withApp { app in
+            try await createBucket(app, bucketName: bucketName)
+
+            // Create multiple multipart uploads
+            for i in 1...3 {
+                let createSigned = signedHeaders(
+                    for: .POST,
+                    path: "/\(bucketName)/file\(i).txt",
+                    query: "uploads"
+                )
+                try await app.test(
+                    .POST, "/\(bucketName)/file\(i).txt?uploads",
+                    beforeRequest: { req in
+                        req.headers.add(contentsOf: createSigned)
+                    },
+                    afterResponse: { res in
+                        #expect(res.status == .ok)
+                    })
+            }
+
+            // List multipart uploads
+            let listSigned = signedHeaders(
+                for: .GET,
+                path: "/\(bucketName)",
+                query: "uploads"
+            )
+
+            try await app.test(
+                .GET, "/\(bucketName)?uploads",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: listSigned)
+                },
+                afterResponse: { res in
+                    #expect(res.status == .ok)
+                    let bodyString = res.body.string
+                    #expect(bodyString.contains("<ListMultipartUploadsResult"))
+                    #expect(bodyString.contains("<Bucket>\(bucketName)</Bucket>"))
+                    #expect(bodyString.contains("<Key>file1.txt</Key>"))
+                    #expect(bodyString.contains("<Key>file2.txt</Key>"))
+                    #expect(bodyString.contains("<Key>file3.txt</Key>"))
+                    #expect(bodyString.contains("<UploadId>"))
+                })
+        }
+    }
+
+    @Test("UploadPart fails for non-existent upload")
+    func testUploadPartNonExistentUpload() async throws {
+        let bucketName = "test-multipart-nonexistent"
+        try await withApp { app in
+            try await createBucket(app, bucketName: bucketName)
+
+            let partData = Data("test".utf8)
+            let partSigned = signedHeaders(
+                for: .PUT,
+                path: "/\(bucketName)/test.txt",
+                query: "partNumber=1&uploadId=nonexistent",
+                body: partData
+            )
+
+            try await app.test(
+                .PUT, "/\(bucketName)/test.txt?partNumber=1&uploadId=nonexistent",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: partSigned)
+                    req.body = ByteBuffer(data: partData)
+                },
+                afterResponse: { res in
+                    #expect(res.status == .notFound)
+                    let bodyString = res.body.string
+                    #expect(bodyString.contains("<Code>NoSuchUpload</Code>"))
+                })
+        }
+    }
+
+    @Test("CompleteMultipartUpload fails with duplicate part numbers")
+    func testCompleteMultipartUploadDuplicateParts() async throws {
+        let bucketName = "test-multipart-duplicate-parts"
+        try await withApp { app in
+            try await createBucket(app, bucketName: bucketName)
+
+            // Create multipart upload
+            let createSigned = signedHeaders(
+                for: .POST,
+                path: "/\(bucketName)/duplicate-parts.txt",
+                query: "uploads"
+            )
+
+            var uploadId: String = ""
+            try await app.test(
+                .POST, "/\(bucketName)/duplicate-parts.txt?uploads",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: createSigned)
+                },
+                afterResponse: { res in
+                    let bodyString = res.body.string
+                    if let range = bodyString.range(of: "<UploadId>"),
+                        let endRange = bodyString[range.upperBound...].range(of: "</UploadId>")
+                    {
+                        uploadId = String(bodyString[range.upperBound..<endRange.lowerBound])
+                    }
+                })
+
+            // Upload part 1
+            let partData = Data("part 1".utf8)
+            var etag1: String = ""
+
+            let partSigned = signedHeaders(
+                for: .PUT,
+                path: "/\(bucketName)/duplicate-parts.txt",
+                query: "partNumber=1&uploadId=\(uploadId)",
+                body: partData
+            )
+            try await app.test(
+                .PUT, "/\(bucketName)/duplicate-parts.txt?partNumber=1&uploadId=\(uploadId)",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: partSigned)
+                    req.body = ByteBuffer(data: partData)
+                },
+                afterResponse: { res in
+                    etag1 = res.headers.first(name: "ETag") ?? ""
+                })
+
+            // Try to complete with duplicate part 1 (should fail)
+            let completeBody = """
+                <CompleteMultipartUpload>
+                    <Part><PartNumber>1</PartNumber><ETag>\(etag1)</ETag></Part>
+                    <Part><PartNumber>1</PartNumber><ETag>\(etag1)</ETag></Part>
+                </CompleteMultipartUpload>
+                """
+            let completeData = Data(completeBody.utf8)
+
+            let completeSigned = signedHeaders(
+                for: .POST,
+                path: "/\(bucketName)/duplicate-parts.txt",
+                query: "uploadId=\(uploadId)",
+                body: completeData
+            )
+
+            try await app.test(
+                .POST, "/\(bucketName)/duplicate-parts.txt?uploadId=\(uploadId)",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: completeSigned)
+                    req.body = ByteBuffer(data: completeData)
+                },
+                afterResponse: { res in
+                    #expect(res.status == .badRequest)
+                })
+        }
+    }
+
+    @Test("CompleteMultipartUpload succeeds with non-sequential parts")
+    func testCompleteMultipartUploadNonSequential() async throws {
+        let bucketName = "test-multipart-nonseq"
+        try await withApp { app in
+            try await createBucket(app, bucketName: bucketName)
+
+            // Create multipart upload
+            let createSigned = signedHeaders(
+                for: .POST,
+                path: "/\(bucketName)/nonseq.txt",
+                query: "uploads"
+            )
+
+            var uploadId: String = ""
+            try await app.test(
+                .POST, "/\(bucketName)/nonseq.txt?uploads",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: createSigned)
+                },
+                afterResponse: { res in
+                    let bodyString = res.body.string
+                    if let range = bodyString.range(of: "<UploadId>"),
+                        let endRange = bodyString[range.upperBound...].range(of: "</UploadId>")
+                    {
+                        uploadId = String(bodyString[range.upperBound..<endRange.lowerBound])
+                    }
+                })
+
+            // Upload parts 1 and 3 (skipping 2) - S3 allows this
+            let part1Data = Data("part 1".utf8)
+            let part3Data = Data("part 3".utf8)
+            var etag1: String = ""
+            var etag3: String = ""
+
+            let part1Signed = signedHeaders(
+                for: .PUT,
+                path: "/\(bucketName)/nonseq.txt",
+                query: "partNumber=1&uploadId=\(uploadId)",
+                body: part1Data
+            )
+            try await app.test(
+                .PUT, "/\(bucketName)/nonseq.txt?partNumber=1&uploadId=\(uploadId)",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: part1Signed)
+                    req.body = ByteBuffer(data: part1Data)
+                },
+                afterResponse: { res in
+                    etag1 = res.headers.first(name: "ETag") ?? ""
+                })
+
+            let part3Signed = signedHeaders(
+                for: .PUT,
+                path: "/\(bucketName)/nonseq.txt",
+                query: "partNumber=3&uploadId=\(uploadId)",
+                body: part3Data
+            )
+            try await app.test(
+                .PUT, "/\(bucketName)/nonseq.txt?partNumber=3&uploadId=\(uploadId)",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: part3Signed)
+                    req.body = ByteBuffer(data: part3Data)
+                },
+                afterResponse: { res in
+                    etag3 = res.headers.first(name: "ETag") ?? ""
+                })
+
+            // Complete with parts 1 and 3 - should succeed
+            let completeBody = """
+                <CompleteMultipartUpload>
+                    <Part><PartNumber>1</PartNumber><ETag>\(etag1)</ETag></Part>
+                    <Part><PartNumber>3</PartNumber><ETag>\(etag3)</ETag></Part>
+                </CompleteMultipartUpload>
+                """
+            let completeData = Data(completeBody.utf8)
+
+            let completeSigned = signedHeaders(
+                for: .POST,
+                path: "/\(bucketName)/nonseq.txt",
+                query: "uploadId=\(uploadId)",
+                body: completeData
+            )
+
+            try await app.test(
+                .POST, "/\(bucketName)/nonseq.txt?uploadId=\(uploadId)",
+                beforeRequest: { req in
+                    req.headers.add(contentsOf: completeSigned)
+                    req.body = ByteBuffer(data: completeData)
+                },
+                afterResponse: { res in
+                    #expect(res.status == .ok)
+                    let bodyString = res.body.string
+                    #expect(bodyString.contains("<ETag>"))
+                    // ETag should end with -2 (2 parts)
+                    #expect(bodyString.contains("-2"))
                 })
         }
     }
